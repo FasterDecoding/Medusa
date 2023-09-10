@@ -39,7 +39,7 @@ We aim to tackle the three pain points of popular acceleration techniques like s
   </picture>
   <br>
   <div align="left" width="80%">
-  <em>Medusa adds extra "heads" to LLMs to predict multiple future tokens simultaneously. When augmenting a model with Medusa, the original model stays untouched, these new heads are fine-tuned during training. During generation, these heads each produce multiple likely next words. These options are then combined and sorted out using a tree-based attention mechanism. Finally, a typical acceptance scheme is employed to pick the most plausible sequence for further decoding.</em>
+  <em>Medusa adds extra "heads" to LLMs to predict multiple future tokens simultaneously. When augmenting a model with Medusa, the original model stays untouched, and only the new heads are fine-tuned during. During generation, these heads each produce multiple likely words for the corresponding position. These options are then combined and processed using a tree-based attention mechanism. Finally, a typical acceptance scheme is employed to pick the longest plausible prefix from the candidates for further decoding.</em>
   </div>
   <br>
 </div>
@@ -48,7 +48,7 @@ In a nutshell, we solve the challenges of speculative decoding with the followin
 
 - Instead of introducing a new model, we train multiple decoding heads on the *same* model.
 - The training is parameter-efficient so that even GPU poor can do it. And since there is no additional model, there is no need to adjust the distributed computing setup.
-- Relaxing the requirement of matching the distribution of the original model makes the generation with random sampling even faster than greedy decoding.
+- Relaxing the requirement of matching the distribution of the original model makes the non-greedy generation even faster than greedy decoding.
 <p align="center">
   <picture>
   <img src="assets/size_speedup.png" width="45%">
@@ -88,7 +88,7 @@ pip install -e .
 ### Model Weights
 | Size | Chat Command                                  | Hugging Face Repo                                                     |
 | ---- | --------------------------------------------- | --------------------------------------------------------------------- |
-| 7B   | `python -m medusa.inference.cli --model FasterDecoding/medusa-vicuna-7b-v1.3` | [FasterDecoding/medusa-vicuna-33b-v1.3](https://huggingface.co/FasterDecoding/medusa-vicuna-7b-v1.3)   |
+| 7B   | `python -m medusa.inference.cli --model FasterDecoding/medusa-vicuna-7b-v1.3` | [FasterDecoding/medusa-vicuna-7b-v1.3](https://huggingface.co/FasterDecoding/medusa-vicuna-7b-v1.3)   |
 | 13B  | `python -m medusa.inference.cli --model FasterDecoding/medusa-vicuna-13b-v1.3` | [FasterDecoding/medusa-vicuna-13b-v1.3](https://huggingface.co/FasterDecoding/medusa-vicuna-13b-v1.3) |
 | 33B  | `python -m medusa.inference.cli --model FasterDecoding/medusa-vicuna-33b-v1.3` | [FasterDecoding/medusa-vicuna-33b-v1.3](https://huggingface.co/FasterDecoding/medusa-vicuna-33b-v1.3) |
 
