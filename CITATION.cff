@@ -1,8 +1,27 @@
-@misc{medusa,
-  author = {Tianle Cai and Yuhong Li and Zhengyang Geng and Hongwu Peng and Tri Dao},
-  title = {Medusa: Simple Framework for Accelerating LLM Generation with Multiple Decoding Heads},
-  year = {2023},
-  publisher = {GitHub},
-  journal = {GitHub repository},
-  howpublished = {\url{https://github.com/FasterDecoding/Medusa}},
-}
+# This CITATION.cff file was generated with cffinit.
+# Visit https://bit.ly/cffinit to generate yours today!
+
+cff-version: 1.2.0
+title: 'Medusa'
+message: >-
+  If you use this software, please cite it using the
+  metadata from this file.
+type: software
+authors:
+  - given-names: Tianle
+    family-names: Cai
+  - given-names: Yuhong
+    family-names: Li
+  - given-names: Zhengyang
+    family-names: Geng
+  - given-names: Hongwu
+    family-names: Peng
+  - given-names: Tri
+    family-names: Dao
+repository-code: 'https://github.com/FasterDecoding/Medusa'
+url: 'https://sites.google.com/view/medusa-llm'
+abstract: >-
+  Medusa: Simple Framework for Accelerating LLM Generation
+  with Multiple Decoding Heads
+license: Apache-2.0
+date-released: '2023-09-10'
