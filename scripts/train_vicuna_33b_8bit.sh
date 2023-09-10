@@ -1,0 +1,21 @@
+torchrun --nproc_per_node=4 medusa/train/train.py --model_name_or_path lmsys/vicuna-33b-v1.3 \
+    --data_path ShareGPT_Vicuna_unfiltered/ShareGPT_V4.3_unfiltered_cleaned_split.json \
+    --bf16 True \
+    --output_dir test \
+    --num_train_epochs 1 \
+    --per_device_train_batch_size 8 \
+    --per_device_eval_batch_size 8 \
+    --gradient_accumulation_steps 4 \
+    --evaluation_strategy "no" \
+    --save_strategy "no" \
+    --learning_rate 1e-3 \
+    --weight_decay 0.0 \
+    --warmup_ratio 0.1 \
+    --lr_scheduler_type "cosine" \
+    --logging_steps 1 \
+    --tf32 True \
+    --model_max_length 2048 \
+    --lazy_preprocess True \
+    --medusa_num_heads 3 \
+    --medusa_num_layers 1 \
+    --load_in_8bit

@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "medusa-llm"
+version = "0.1"
+description = "Simple Framework for Accelerating LLM Generation with Multiple Decoding Heads"
+readme = "README.md"
+requires-python = ">=3.9"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: Apache Software License",
+]
+dependencies = [
+    "fschat", "torch", "transformers", "accelerate", "sentencepiece", "protobuf"
+]
+
+[project.optional-dependencies]
+train = ["bitsandbytes", "wandb", "scipy"]
+
+[project.urls]
+"Homepage" = "https://github.com/FasterDecoding/Medusa"
+"Blog" = "https://sites.google.com/view/medusa-llm"
+
+[tool.setuptools.packages.find]
+exclude = ["assets*", "notebooks*", "scripts*"]
