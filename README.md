@@ -30,7 +30,7 @@ We aim to tackle the three pain points of popular acceleration techniques like s
 
 - Requirement of a good draft model.
 - System complexity.
-- Inefficiency when using sampling-based genenration.
+- Inefficiency when using sampling-based generation.
 
 
 <div align="center">
@@ -39,15 +39,15 @@ We aim to tackle the three pain points of popular acceleration techniques like s
   </picture>
   <br>
   <div align="left" width="80%">
-  <em>Medusa adds extra "heads" to LLMs to predict multiple future tokens simultaneously. When augmenting a model with Medusa, the original model stays untouched, and only the new heads are fine-tuned during. During generation, these heads each produce multiple likely words for the corresponding position. These options are then combined and processed using a tree-based attention mechanism. Finally, a typical acceptance scheme is employed to pick the longest plausible prefix from the candidates for further decoding.</em>
+  <em>Medusa adds extra "heads" to LLMs to predict multiple future tokens simultaneously. When augmenting a model with Medusa, the original model stays untouched, and only the new heads are fine-tuned during training. During generation, these heads each produce multiple likely words for the corresponding position. These options are then combined and processed using a tree-based attention mechanism. Finally, a typical acceptance scheme is employed to pick the longest plausible prefix from the candidates for further decoding.</em>
   </div>
   <br>
 </div>
 
-In a nutshell, we solve the challenges of speculative decoding with the following ideas:
+We aim to solve the challenges associated with speculative decoding by implementing the following ideas:
 
 - Instead of introducing a new model, we train multiple decoding heads on the *same* model.
-- The training is parameter-efficient so that even GPU poor can do it. And since there is no additional model, there is no need to adjust the distributed computing setup.
+- The training is parameter-efficient so that even the "GPU-Poor" can do it. And since there is no additional model, there is no need to adjust the distributed computing setup.
 - Relaxing the requirement of matching the distribution of the original model makes the non-greedy generation even faster than greedy decoding.
 <p align="center">
   <picture>
@@ -93,9 +93,9 @@ pip install -e .
 | 33B  | `python -m medusa.inference.cli --model FasterDecoding/medusa-vicuna-33b-v1.3` | [FasterDecoding/medusa-vicuna-33b-v1.3](https://huggingface.co/FasterDecoding/medusa-vicuna-33b-v1.3) |
 
 ### Inference
-We currently support inference in the single GPU and batch size 1 setting, which is the most common setup for local model hosting. We are actively working to extend Medusa's capabilities by integrating it into other inference frameworks, please don't hesitate to reach out if you are interested in contributing to this effort.
+We currently support single-GPU inference with a batch size of 1, which is the most common setup for local model hosting. We are actively working to extend Medusa's capabilities by integrating it into other inference frameworks; please don't hesitate to reach out if you are interested in contributing to this effort.
 
-You can use the following command for lauching a CLI interface:
+You can use the following command for launching a CLI interface:
 ```bash
 CUDA_VISIBLE_DEVICES=0 python -m medusa.inference.cli --model [path of medusa model]
 ```
@@ -162,4 +162,4 @@ We also provide some illustrative notebooks in `notebooks/` to help you understa
 We welcome community contributions to Medusa. If you have an idea for how to improve it, please open an issue to discuss it with us. When submitting a pull request, please ensure that your changes are well-tested. Please split each major change into a separate pull request. We also have a [Roadmap](ROADMAP.md) summarizing our future plans for Medusa. Don't hesitate to reach out if you are interested in contributing to any of the items on the roadmap.
 
 ## Acknowledgements
-This codebase is influenced by amazing works from the community, including [FastChat](https://github.com/lm-sys/FastChat), [TinyChat](https://github.com/mit-han-lab/llm-awq/tree/main/), [vllm](https://github.com/vllm-project/vllm) and many others.
+This codebase is influenced by remarkable projects from the LLM community, including [FastChat](https://github.com/lm-sys/FastChat), [TinyChat](https://github.com/mit-han-lab/llm-awq/tree/main/), [vllm](https://github.com/vllm-project/vllm) and many others.
