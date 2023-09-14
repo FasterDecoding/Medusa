@@ -111,6 +111,10 @@ We take a public version of the ShareGPT dataset, which is a subset of the Vicun
 ```bash
 git clone https://huggingface.co/datasets/Aeala/ShareGPT_Vicuna_unfiltered
 ```
+Remark: If you haven't installed `git-lfs`, please install it before clone:
+```bash
+git lfs install
+```
 #### Train the model
 We follow the training setup from [FastChat](https://github.com/lm-sys/FastChat#fine-tuning), but with a much larger learning rate because we freeze the original model and only train the new heads. Here is the training command for the Vicuna-7b model on 4 GPUs. Since we are only training the new heads, the training does not require a lot of memory, and only data parallelism is needed. You can modify the script to fit your own setup. For larger models, we use the same setup. You can also use `--load_in_8bit` or `--load_in_4bit` to load the base model in quantized format.
 ```bash
