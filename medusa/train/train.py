@@ -386,10 +386,10 @@ def train():
     # trainer.save_state()
     # safe_save_model_for_hf_trainer(trainer=trainer, output_dir=training_args.output_dir)
     # Save MedusaHead seperately
-    if hasattr(model, "module"):
-        lm_head = model.module.medusa_head
+    if hasattr(medusa_lm_head, "module"):
+        lm_head = medusa_lm_head.module.medusa_head
     else:
-        lm_head = model.medusa_head
+        lm_head = medusa_lm_head.medusa_head
 
     # Save Medusa heads
     torch.save(
