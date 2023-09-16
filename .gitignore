@@ -166,3 +166,6 @@ wandb/
 ShareGPT_Vicuna_unfiltered/
 
 test_medusa*
+
+# test
+notebooks/test*.ipynb
