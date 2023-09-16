@@ -1,6 +1,7 @@
 # Roadmap
 
 ## Functionality
+- [ ] Explore tree sparsity
 - [ ] Fine-tune Medusa heads together with LM head from scratch
 - [ ] Distill from any model without access to the original training data
 - [ ] Batched inference
