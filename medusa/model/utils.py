@@ -1,127 +1,122 @@
 import torch
 
-TOPK=10 # topk for sparse tree
-
-def pad_path(path, length, pad_value=-2):
-    """
-    Pad the given path list with a specific value up to a specified length.
-    
-    Parameters:
-    - path (list): The original list that needs padding.
-    - length (int): The desired length of the padded list.
-    - pad_value (optional, default=-2): The value to use for padding.
-    
-    Returns:
-    - list: A new list based on the original path but padded to the desired length.
-    
-    Example:
-    >>> pad_path([1,2,3], 5)
-    [1, 2, 3, -2, -2]
-    
-    Note:
-    If the given path is already longer than the specified length, 
-    then no padding occurs, and the original path is returned.
-    """
-    
-    # Calculate the number of padding values needed by subtracting the length
-    # of the path from the desired length.
-    # Append the padding values to the original path and return the new list.
-    return path + [pad_value] * (length - len(path))
 
 def generate_medusa_buffers(medusa_choices, device="cuda"):
     """
-    Generate buffers for the Medusa structure based on the provided choices.
-    
-    Parameters:
-    - medusa_choices (list): A nested list representing tree in the Medusa structure.
-    - device (str): Device to which the tensors should be moved. Default is "cuda".
-    
+    Generate buffers related to the Medusa structure.
+    Split each part for readability.
+
+    Explanation of each buffer in the returned dictionary:
+    1. tree_indices: Represents indices that map items from a linear list to a tree structure.
+    2. medusa_attn_mask: The attention mask designed specifically for the Medusa structure, ensuring proper attention computation.
+    3. medusa_position_ids: Denotes the position identifiers used within the Medusa structure.
+    4. retrieve_indices: Provides indices that map items from a tree structure back to their original positions in a cartesian product.
+    5. list_indices: Represents indices mapping items from a tree back to a list. This is intended for a future feature and is currently under testing.
+
+    Args:
+        medusa_choices (torch.Tensor): A tensor containing choices for the Medusa structure.
+        device (str, optional): Target device for the generated buffers. Defaults to "cuda".
+
     Returns:
-    - dict: A dictionary containing buffers related to the Medusa structure.
+        dict: A dictionary containing several buffer tensors for the Medusa structure.
     """
-
-    # Sort the medusa_choices based on their lengths and then their values
-    sorted_medusa_choices = sorted(medusa_choices, key=lambda x: (len(x), x))
-    medusa_len = len(sorted_medusa_choices) + 1
-
-    # Initialize depth_counts to keep track of how many choices have a particular depth
-    depth_counts = []
-    prev_depth = 0
-    for path in sorted_medusa_choices:
-        depth = len(path)
-        if depth != prev_depth:
-            depth_counts.append(0)
-        depth_counts[depth - 1] += 1
-        prev_depth = depth
-    
-    # Create the attention mask for Medusa
+    medusa_choices = torch.tensor(medusa_choices)
+    cumulative_product = torch.cumprod(medusa_choices, dim=0)
+    cumulative_sum = torch.cumsum(medusa_choices, dim=0)
+    medusa_len = cumulative_product.sum().item()
     medusa_attn_mask = torch.eye(medusa_len, medusa_len)
-    medusa_attn_mask[:, 0] = 1
-    start = 0
-    for i in range(len(depth_counts)):
-        for j in range(depth_counts[i]):
-            cur_medusa_choice = sorted_medusa_choices[start + j]
-            # retrieve ancestor position
-            if len(cur_medusa_choice) == 1:
-                continue
-            ancestor_idx = []
-            for c in range(len(cur_medusa_choice) - 1):
-                ancestor_idx.append(sorted_medusa_choices.index(cur_medusa_choice[:c+1]) + 1)
-            medusa_attn_mask[j + start + 1, ancestor_idx] = 1
-        start += depth_counts[i]
 
-    # Generate tree indices for the Medusa structure
-    medusa_tree_indices = torch.zeros(medusa_len, dtype=torch.long)
-    medusa_tree_indices[0] = 0
-    start = 0
-    for i in range(len(depth_counts)):
-        for j in range(depth_counts[i]):
-            cur_medusa_choice = sorted_medusa_choices[start + j]
-            medusa_tree_indices[start + j + 1] = cur_medusa_choice[-1] + TOPK * i + 1
-        start += depth_counts[i]
+    # 1. Generate tree indices based on the Medusa choices
+    medusa_indices = torch.arange(cumulative_sum[-1])
+    tree_indices = []
+    prev_cumsum = 0
+    prev_cumprod = 1
+    for i in range(medusa_choices.size(0)):
+        cumsum = cumulative_sum[i].item()
+        cumprod = cumulative_product[i].item()
+        slice = medusa_indices[prev_cumsum:cumsum].repeat(prev_cumprod, 1).flatten()
+        tree_indices += slice.tolist()
+        prev_cumsum = cumsum
+        prev_cumprod = cumprod
 
-    # Generate position IDs for the Medusa structure
-    medusa_position_ids = torch.zeros(medusa_len, dtype=torch.long)
-    start = 0
-    for i in range(len(depth_counts)):
-        medusa_position_ids[start + 1: start + depth_counts[i] + 1] = i + 1
-        start += depth_counts[i]
+    # 2. Update the Medusa attention mask
+    prev_cumprod_sum = -1
+    for i in range(medusa_choices.size(0)):
+        cumprod_sum = cumulative_product[:i].sum().item()
+        if prev_cumprod_sum != -1:
+            parent_idx = (
+                torch.arange(prev_cumprod_sum, cumprod_sum)
+                .repeat(medusa_choices[i], 1)
+                .transpose(0, 1)
+                .flatten()
+            )
+            medusa_attn_mask[
+                cumprod_sum : cumprod_sum + parent_idx.size(0)
+            ] += medusa_attn_mask[parent_idx]
+        prev_cumprod_sum = cumulative_product[:i].sum().item()
 
-    # Generate retrieval indices for Medusa structure verification
-    retrieve_indices_nest = []
-    retrieve_paths = []
-    for i in range(len(sorted_medusa_choices)):
-        cur_medusa_choice = sorted_medusa_choices[-i-1]
-        retrieve_indice = []
-        if cur_medusa_choice in retrieve_paths:
-            continue
-        else:
-            for c in range(len(cur_medusa_choice)):
-                retrieve_indice.append(sorted_medusa_choices.index(cur_medusa_choice[:c+1]))
-                retrieve_paths.append(cur_medusa_choice[:c+1])
-        retrieve_indices_nest.append(retrieve_indice)
-    max_length = max([len(x) for x in retrieve_indices_nest])
-    retrieve_indices = [pad_path(path, max_length) for path in retrieve_indices_nest]
-    retrieve_indices = torch.tensor(retrieve_indices, dtype=torch.long)
-    retrieve_indices = retrieve_indices + 1
-    retrieve_indices = torch.cat([torch.zeros((retrieve_indices.shape[0], 1), dtype=torch.long), retrieve_indices], dim=1)
+    # 3. Generate Medusa position IDs
+    medusa_position_ids = []
+    for i in range(medusa_choices.size(0)):
+        medusa_position_ids += [i] * cumulative_product[i]
 
-    # Aggregate the generated buffers into a dictionary
-    medusa_buffers = {
+    # 4. Generate retrieval indices for Medusa structure verification
+    medusa_len_prod = torch.prod(medusa_choices).item()
+    retrieve_indices = torch.zeros(
+        medusa_len_prod, len(medusa_choices), dtype=torch.long
+    )
+    prev_cumprod_sum = 0
+    for i in range(medusa_choices.size(0)):
+        cumprod_sum = cumulative_product[: i + 1].sum().item()
+        retrieve_indices[:, i] = (
+            torch.arange(prev_cumprod_sum, cumprod_sum)
+            .repeat(medusa_len_prod // (cumprod_sum - prev_cumprod_sum), 1)
+            .transpose(0, 1)
+            .flatten()
+        )
+        prev_cumprod_sum = cumprod_sum
+
+    # 5. Generate list indices for Medusa structure
+    list_indices = []
+    cumulative_product = torch.cumprod(medusa_choices, dim=0)
+    cumulative_product_max = torch.max(cumulative_product)
+    prev_cumprod_sum = 0
+
+    for i in range(medusa_choices.size(0)):
+        current_indices = torch.arange(
+            prev_cumprod_sum, prev_cumprod_sum + medusa_choices[i]
+        )
+        current_indices = current_indices.repeat(
+            cumulative_product[i] // medusa_choices[i], 1
+        ) + torch.arange(cumulative_product[i] // medusa_choices[i]).unsqueeze(
+            -1
+        ) * current_indices.size(
+            0
+        )
+        current_indices = current_indices.repeat(
+            cumulative_product_max // (cumulative_product[i] // medusa_choices[i]), 1
+        )
+        list_indices.append(current_indices)
+        prev_cumprod_sum += cumulative_product[i]
+    list_indices = torch.cat(list_indices, dim=1).transpose(0, 1)
+
+    # Compile all the buffers into a dictionary
+    ret = {
         "medusa_attn_mask": medusa_attn_mask.unsqueeze(0).unsqueeze(0),
-        "tree_indices": medusa_tree_indices,
+        "tree_indices": tree_indices,
         "medusa_position_ids": medusa_position_ids,
         "retrieve_indices": retrieve_indices,
-        }
-    
-    # Move the tensors in the dictionary to the specified device
-    medusa_buffers = {
+        "list_indices": list_indices,
+    }
+
+    # Convert all items in the dictionary to tensors and move them to the specified device
+    ret = {
         k: v.clone().to(device)
         if isinstance(v, torch.Tensor)
-        else torch.tensor(v,  device=device)
-        for k, v in medusa_buffers.items()
+        else torch.tensor(v, device=device)
+        for k, v in ret.items()
     }
-    return medusa_buffers
+    return ret
 
 
 def initialize_medusa(input_ids, model, medusa_attn_mask, past_key_values):
@@ -193,41 +188,36 @@ def reset_past_key_values(passed_key_values):
     return passed_key_values
 
 
-def generate_candidates(medusa_logits, logits, tree_indices, retrieve_indices):
+def generate_candidates(medusa_logits, logits, medusa_topk, tree_indices, temperature):
     """
-    Generate candidates based on provided logits and indices.
-    
-    Parameters:
-    - medusa_logits (torch.Tensor): Logits associated with the Medusa structure.
-    - logits (torch.Tensor): Original logits.
-    - tree_indices (list or torch.Tensor): Indices associated with a tree structure.
-    - retrieve_indices (list or torch.Tensor): Indices for retrieving candidates.
-    
+    Generates candidate tokens based on the Medusa logits and original logits.
+
+    This function performs a greedy decoding on the original logits to retrieve
+    the most likely token. For the Medusa logits, it retrieves the top-k tokens
+    as specified by the `medusa_topk` argument. Finally, the function reshapes
+    and matches these candidates based on the tree structure defined by `tree_indices`.
+
+    Args:
+    - medusa_logits (torch.Tensor): Output tensor of shape (medusa, batch_size, vocabulary_size)
+      representing the logits from Medusa layers.
+    - logits (torch.Tensor): Original logits tensor of shape (batch_size, sequence_length, vocabulary_size).
+    - medusa_topk (list of int): Contains the number of top-k tokens to consider for each Medusa layer.
+    - tree_indices (list or torch.Tensor): Index mapping from a flattened list to tree structure.
+    - temperature (float): Scaling factor to modulate the logits' values before generating candidates (not used in this function but kept for future extensions).
+
     Returns:
-    - tuple: Returns cartesian candidates and tree candidates.
+    - candidates (torch.Tensor): Cartesian product of candidate tokens across Medusa layers.
+    - tree_candidates (torch.Tensor): Reshaped candidates matched to the tree structure.
     """
-
-    # Greedy decoding: Select the most probable candidate from the original logits.
-    candidates_logit = torch.argmax(logits[:, -1]).unsqueeze(0)
-
-    # Extract the TOPK candidates from the medusa logits.
-    candidates_medusa_logits = torch.topk(medusa_logits[:, 0, -1], TOPK, dim = -1).indices
-
-    # Combine the selected candidate from the original logits with the topk medusa logits.
-    candidates = torch.cat([candidates_logit, candidates_medusa_logits.view(-1)], dim=-1)
-
-    # Map the combined candidates to the tree indices to get tree candidates.
-    tree_candidates = candidates[tree_indices]
-
-    # Extend the tree candidates by appending a zero.
-    tree_candidates_ext = torch.cat([tree_candidates, torch.zeros((1), dtype=torch.long, device=tree_candidates.device)], dim=0)
-
-    # Retrieve the cartesian candidates using the retrieve indices.
-    cart_candidates = tree_candidates_ext[retrieve_indices]
-
-    # Unsqueeze the tree candidates for dimension consistency.
-    tree_candidates = tree_candidates.unsqueeze(0)
-    return cart_candidates, tree_candidates
+    # Greedy decoding for original logits
+    candidates = [torch.argmax(logits[:, -1]).unsqueeze(0)]
+    for i in range(medusa_logits.shape[0]):
+        candidate_i = torch.topk(medusa_logits[i, 0, -1], medusa_topk[i]).indices
+        candidates.append(candidate_i)
+    candidates_flat = torch.cat(candidates)
+    candidates = torch.cartesian_prod(*candidates)
+    tree_candidates = candidates_flat[tree_indices].unsqueeze(0)
+    return candidates, tree_candidates
 
 
 def tree_decoding(
@@ -239,33 +229,36 @@ def tree_decoding(
     retrieve_indices,
 ):
     """
-    Decode the tree candidates using the provided model and reorganize the logits.
-    
-    Parameters:
-    - model (nn.Module): Model to be used for decoding the tree candidates.
-    - tree_candidates (torch.Tensor): Input candidates based on a tree structure.
-    - past_key_values (torch.Tensor): Past states, such as key and value pairs, used in attention layers.
-    - medusa_position_ids (torch.Tensor): Positional IDs associated with the Medusa structure.
-    - input_ids (torch.Tensor): Input sequence IDs.
-    - retrieve_indices (list or torch.Tensor): Indices for reordering the logits.
-    
+    Decodes the token sequences using a tree-based approach with Medusa layers.
+
+    Given the candidates for token sequences and the current past key values, the function
+    decodes the sequences using the model's Medusa layers and retrieves the logits
+    corresponding to the desired positions in the sequence.
+
+    Args:
+    - model (nn.Module): The main model with Medusa layers.
+    - tree_candidates (torch.Tensor): Candidate tokens for the current decoding step based on the tree structure.
+    - past_key_values (list of torch.Tensor): List of past key-value states to use for autoregressive decoding.
+    - medusa_position_ids (list or torch.Tensor): Position IDs for the Medusa structure.
+    - input_ids (torch.Tensor): The input token sequences of shape (batch_size, sequence_length).
+    - retrieve_indices (list or torch.Tensor): Indices mapping from tree to cartesian product, used to reorder the logits.
+
     Returns:
-    - tuple: Returns medusa logits, regular logits, and other outputs from the model.
+    - medusa_logits (torch.Tensor): Medusa logits corresponding to the current decoding step.
+    - logits (torch.Tensor): Original logits for the current step.
+    - outputs (tuple): Intermediate model outputs.
     """
 
-    # Compute new position IDs by adding the Medusa position IDs to the length of the input sequence.
+    # Compute new position IDs based on the Medusa structure and current input sequence length
     position_ids = medusa_position_ids + input_ids.shape[1]
-
-    # Use the model to decode the tree candidates. 
-    # The model is expected to return logits for the Medusa structure, original logits, and possibly other outputs.
+    # Decode the tree candidates using the model
     tree_medusa_logits, outputs, tree_logits = model(
         tree_candidates,
         output_orig=True,
         past_key_values=past_key_values,
         position_ids=position_ids,
     )
-    
-    # Reorder the obtained logits based on the retrieve_indices to ensure consistency with some reference ordering.
+    # Reorder the logits based on the retrieve_indices for consistency
     logits = tree_logits[0, retrieve_indices]
     medusa_logits = tree_medusa_logits[:, 0, retrieve_indices]
     return medusa_logits, logits, outputs
