@@ -62,7 +62,7 @@ class MedusaModel(nn.Module):
     def __init__(
         self,
         base_model,
-        medusa_num_heads=2,
+        medusa_num_heads=4,
         medusa_num_layers=1,
         base_model_name_or_path="lmsys/vicuna-7b-v1.3",
     ):
