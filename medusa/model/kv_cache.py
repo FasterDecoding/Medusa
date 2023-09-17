@@ -4,6 +4,7 @@ import torch
 class KVCache:
     """
     A key-value cache for the model.
+
     This class provides a mechanism to maintain a growing cache of keys and values,
     particularly useful for models that benefit from caching previous states,
     like transformers during autoregressive decoding.
@@ -15,6 +16,8 @@ class KVCache:
 
     def __init__(self, data, current_length):
         """
+        Initialize the KVCache.
+
         Args:
             data (torch.Tensor): Initial tensor to store the keys and values.
             current_length (int): Initial length of the data.
