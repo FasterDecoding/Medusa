@@ -110,6 +110,7 @@ class MedusaModel(nn.Module):
     def from_pretrained(
         cls,
         medusa_head_name_or_path,
+        base_model=None,
         **kwargs,
     ):
         """
@@ -121,6 +122,10 @@ class MedusaModel(nn.Module):
             MedusaModel: A MedusaModel instance loaded from the given path.
         """
         medusa_config = MedusaConfig.from_pretrained(medusa_head_name_or_path)
+        if base_model:
+            print("Overriding base model as:", base_model)
+            medusa_config.base_model_name_or_path = base_model
+            
         base_model = KVLlamaForCausalLM.from_pretrained(
             medusa_config.base_model_name_or_path, **kwargs
         )
