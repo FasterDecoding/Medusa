@@ -4,21 +4,21 @@ import torch
 def generate_medusa_buffers(medusa_choices, device="cuda"):
     """
     Generate buffers related to the Medusa structure.
-    Split each part for readability.
-
-    Explanation of each buffer in the returned dictionary:
-    1. tree_indices: Represents indices that map items from a linear list to a tree structure.
-    2. medusa_attn_mask: The attention mask designed specifically for the Medusa structure, ensuring proper attention computation.
-    3. medusa_position_ids: Denotes the position identifiers used within the Medusa structure.
-    4. retrieve_indices: Provides indices that map items from a tree structure back to their original positions in a cartesian product.
-    5. list_indices: Represents indices mapping items from a tree back to a list. This is intended for a future feature and is currently under testing.
+    
+    This function generates various buffers used in the Medusa structure, which is a complex data structure consisting of a tree-like hierarchy. The buffers include indices, attention masks, position identifiers, and more.
 
     Args:
         medusa_choices (torch.Tensor): A tensor containing choices for the Medusa structure.
         device (str, optional): Target device for the generated buffers. Defaults to "cuda".
 
     Returns:
-        dict: A dictionary containing several buffer tensors for the Medusa structure.
+        dict: A dictionary containing several buffer tensors for the Medusa structure. The dictionary includes:
+        
+        - "tree_indices": Represents indices that map items from a linear list to a tree structure.
+        - "medusa_attn_mask": The attention mask designed specifically for the Medusa structure, ensuring proper attention computation.
+        - "medusa_position_ids": Denotes the position identifiers used within the Medusa structure.
+        - "retrieve_indices": Provides indices that map items from a tree structure back to their original positions in a cartesian product.
+        - "list_indices": Represents indices mapping items from a tree back to a list. This is intended for a future feature and is currently under testing.
     """
     medusa_choices = torch.tensor(medusa_choices)
     cumulative_product = torch.cumprod(medusa_choices, dim=0)
