@@ -99,7 +99,7 @@ You can use the following command for launching a CLI interface:
 ```bash
 CUDA_VISIBLE_DEVICES=0 python -m medusa.inference.cli --model [path of medusa model]
 ```
-You can also pass `--load-in-8bit` or `--load-in-4bit` to load the base model in quantized format.
+You can also pass `--load-in-8bit` or `--load-in-4bit` to load the base model in quantized format. If you download the base model elsewhere, you may override base model name or path with `--base-model  [path of base model]`.
 
 ### Training
 For training, please install:
