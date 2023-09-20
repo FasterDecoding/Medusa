@@ -2,9 +2,10 @@ import torch
 import torch.nn as nn
 from transformers import PreTrainedModel, PretrainedConfig
 from .modeling_llama_kv import LlamaForCausalLM as KVLlamaForCausalLM
-from transformers import AutoTokenizer
 from .utils import *
 from .kv_cache import initialize_past_key_values
+from .medusa_choices import mc_sim_7b_63
+from transformers import AutoTokenizer
 import os
 from huggingface_hub import hf_hub_download
 
@@ -22,7 +23,7 @@ class MedusaConfig(PretrainedConfig):
 
     def __init__(
         self,
-        medusa_num_heads=2,
+        medusa_num_heads=4,
         medusa_num_layers=1,
         base_model_name_or_path="lmsys/vicuna-7b-v1.3",
         **kwargs,
@@ -76,7 +77,7 @@ class MedusaModel(nn.Module):
     def __init__(
         self,
         base_model,
-        medusa_num_heads=2,
+        medusa_num_heads=4,
         medusa_num_layers=1,
         base_model_name_or_path="lmsys/vicuna-7b-v1.3",
     ):
@@ -125,6 +126,7 @@ class MedusaModel(nn.Module):
     def from_pretrained(
         cls,
         medusa_head_name_or_path,
+        medusa_num_heads=None,
         base_model=None,
         **kwargs,
     ):
@@ -137,13 +139,17 @@ class MedusaModel(nn.Module):
             MedusaModel: A MedusaModel instance loaded from the given path.
         """
         medusa_config = MedusaConfig.from_pretrained(medusa_head_name_or_path)
-        if base_model:
-            print("Overriding base model as:", base_model)
+        if medusa_num_heads is not None:
+            print("Overriding medusa_num_heads as:", medusa_num_heads)
+            medusa_config.medusa_num_heads = medusa_num_heads
+        if base_model is not None:
+            print("Overriding base_model as:", base_model)
             medusa_config.base_model_name_or_path = base_model
             
         base_model = KVLlamaForCausalLM.from_pretrained(
             medusa_config.base_model_name_or_path, **kwargs
         )
+
         model = cls(
             base_model,
             medusa_config.medusa_num_heads,
@@ -211,7 +217,7 @@ class MedusaModel(nn.Module):
         max_steps=512,
         # The hyperparameters below are for the Medusa
         # top-1 prediciton for the next token, top-7 predictions for the next token, top-6 predictions for the next next token.
-        medusa_choices=[1, 7, 6],
+        medusa_choices=mc_sim_7b_63,
         posterior_threshold=0.09,  # threshold validation of Medusa output
         # another threshold hyperparameter, recommended to be sqrt(posterior_threshold)
         posterior_alpha=0.3,
@@ -245,7 +251,6 @@ class MedusaModel(nn.Module):
         self.medusa_buffers = medusa_buffers
         self.medusa_choices = medusa_choices
 
-        medusa_topk = medusa_choices[1:]
 
         # Initialize the past key and value states
         if hasattr(self, "past_key_values"):
@@ -280,9 +285,8 @@ class MedusaModel(nn.Module):
             candidates, tree_candidates = generate_candidates(
                 medusa_logits,
                 logits,
-                medusa_topk,
                 medusa_buffers["tree_indices"],
-                temperature,
+                medusa_buffers["retrieve_indices"],
             )
 
             # Use tree attention to verify the candidates and get predictions
