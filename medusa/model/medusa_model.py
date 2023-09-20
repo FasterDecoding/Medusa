@@ -126,8 +126,8 @@ class MedusaModel(nn.Module):
     def from_pretrained(
         cls,
         medusa_head_name_or_path,
-        medusa_num_heads=None,
         base_model=None,
+        medusa_num_heads=None,
         **kwargs,
     ):
         """
