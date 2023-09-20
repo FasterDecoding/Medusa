@@ -7,7 +7,8 @@ medusa-llm"><b>Blog</b></a> | <a href="ROADMAP.md"><b>Roadmap</b></a> |
 
 ---
 *News* 🔥
-- [2023/09] Medusa v0.1 is released! 🎉
+- [2023/09] Medusa won the [Chai Prize Grant](https://twitter.com/tianle_cai/status/1703891335147897341)🎉 The prize will be used as a development bounty for those who help us achieve milestones in our [roadmap](https://github.com/FasterDecoding/Medusa/issues/3)!
+- [2023/09] Medusa v0.1 is released! 
 
 ---
 ## Introduction
@@ -78,7 +79,7 @@ In this initial release, our primary focus is on optimizing Medusa for a batch s
 ```bash
 pip install medusa-llm
 ```
-### Method 2: From source
+### Method 2: From the source
 ```bash
 git clone https://github.com/FasterDecoding/Medusa.git
 cd Medusa
@@ -95,11 +96,11 @@ pip install -e .
 ### Inference
 We currently support single-GPU inference with a batch size of 1, which is the most common setup for local model hosting. We are actively working to extend Medusa's capabilities by integrating it into other inference frameworks; please don't hesitate to reach out if you are interested in contributing to this effort.
 
-You can use the following command for launching a CLI interface:
+You can use the following command to launch a CLI interface:
 ```bash
 CUDA_VISIBLE_DEVICES=0 python -m medusa.inference.cli --model [path of medusa model]
 ```
-You can also pass `--load-in-8bit` or `--load-in-4bit` to load the base model in quantized format.
+You can also pass `--load-in-8bit` or `--load-in-4bit` to load the base model in quantized format. If you download the base model elsewhere, you may override base model name or path with `--base-model  [path of base model]`.
 
 ### Training
 For training, please install:
@@ -111,7 +112,7 @@ We take a public version of the ShareGPT dataset, which is a subset of the Vicun
 ```bash
 git clone https://huggingface.co/datasets/Aeala/ShareGPT_Vicuna_unfiltered
 ```
-Remark: If you haven't installed `git-lfs`, please install it before clone:
+Remark: If you haven't installed `git-lfs`, please install it before cloning:
 ```bash
 git lfs install
 ```
@@ -158,7 +159,7 @@ python -m medusa.hf_utils --folder [path of the model folder] --repo [name of th
 ```
 
 ## Codebase Guide
-`medusa/model/medusa_model.py` is the key file for Medusa. It contains the `MedusaModel` class, which is a wrapper of the original model and the new heads. This class also has implementation of a streaming generation method. If you want to dive into the details of Medusa, this is the place to start.
+`medusa/model/medusa_model.py` is the key file for Medusa. It contains the `MedusaModel` class, which is a wrapper of the original model and the new heads. This class also has an implementation of a streaming generation method. If you want to dive into the details of Medusa, this is the place to start.
 
 We also provide some illustrative notebooks in `notebooks/` to help you understand the codebase.
 

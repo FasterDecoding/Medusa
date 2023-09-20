@@ -43,6 +43,17 @@ IGNORE_TOKEN_ID = LabelSmoother.ignore_index
 # Customized for training Medusa heads
 class CustomizedTrainer(Trainer):
     def compute_loss(self, model, inputs, return_outputs=False):
+        """
+        Compute the training loss for the model.
+
+        Args:
+            model (torch.nn.Module): The model for which to compute the loss.
+            inputs (dict): The input data, including input IDs, attention mask, and labels.
+            return_outputs (bool): Whether to return model outputs along with the loss.
+
+        Returns:
+            Union[float, Tuple[float, torch.Tensor]]: The computed loss, optionally with model outputs.
+        """
         # DDP will give us model.module
         if hasattr(model, "module"):
             medusa = model.module.medusa
@@ -134,7 +145,13 @@ def rank0_print(*args):
 
 
 def safe_save_model_for_hf_trainer(trainer: transformers.Trainer, output_dir: str):
-    """Collects the state dict and dump to disk."""
+    """
+    Save the model's state dictionary to a specified directory.
+
+    Args:
+        trainer (transformers.Trainer): The Hugging Face Trainer object.
+        output_dir (str): The directory where the model state dictionary will be saved.
+    """
     state_dict = trainer.model.state_dict()
     if trainer.args.should_save:
         cpu_state_dict = {key: value.cpu() for key, value in state_dict.items()}
@@ -146,6 +163,16 @@ def preprocess(
     sources,
     tokenizer: transformers.PreTrainedTokenizer,
 ) -> Dict:
+    """
+    Preprocesses conversation data and tokenizes it for model input.
+
+    Args:
+        sources: A list of conversation sources.
+        tokenizer (transformers.PreTrainedTokenizer): The tokenizer to use for tokenization.
+
+    Returns:
+        Dict: A dictionary containing tokenized inputs, labels, and attention mask.
+    """
     conv = get_conversation_template("vicuna")
     roles = {"human": conv.roles[0], "gpt": conv.roles[1]}
 
@@ -222,7 +249,12 @@ def preprocess(
 
 
 class SupervisedDataset(Dataset):
-    """Dataset for supervised fine-tuning."""
+    """Dataset for supervised fine-tuning.
+
+    Args:
+        raw_data (list): A list of raw data examples.
+        tokenizer (transformers.PreTrainedTokenizer): The tokenizer to use for data preprocessing.
+    """
 
     def __init__(self, raw_data, tokenizer: transformers.PreTrainedTokenizer):
         super(SupervisedDataset, self).__init__()
@@ -247,7 +279,14 @@ class SupervisedDataset(Dataset):
 
 
 class LazySupervisedDataset(Dataset):
-    """Dataset for supervised fine-tuning."""
+    """Lazy dataset for supervised fine-tuning.
+
+    This dataset loads data on-the-fly when requested, which can be memory-efficient but slower.
+
+    Args:
+        raw_data (list): A list of raw data examples.
+        tokenizer (transformers.PreTrainedTokenizer): The tokenizer to use for data preprocessing.
+    """
 
     def __init__(self, raw_data, tokenizer: transformers.PreTrainedTokenizer):
         super(LazySupervisedDataset, self).__init__()
@@ -279,7 +318,15 @@ class LazySupervisedDataset(Dataset):
 def make_supervised_data_module(
     tokenizer: transformers.PreTrainedTokenizer, data_args
 ) -> Dict:
-    """Make dataset and collator for supervised fine-tuning."""
+    """Make dataset and collator for supervised fine-tuning.
+
+    Args:
+        tokenizer (transformers.PreTrainedTokenizer): The tokenizer to use for data preprocessing.
+        data_args: Data arguments.
+
+    Returns:
+        dict: A dictionary containing train and eval datasets.
+    """
     dataset_cls = (
         LazySupervisedDataset if data_args.lazy_preprocess else SupervisedDataset
     )
@@ -345,6 +392,7 @@ def train():
         model,
         medusa_num_heads=training_args.medusa_num_heads,
         medusa_num_layers=training_args.medusa_num_layers,
+        base_model_name_or_path=model_args.model_name_or_path,
     )
 
     # Format output dir
