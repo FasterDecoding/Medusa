@@ -22,6 +22,7 @@ python gen_model_answer_medusa.py  --model-path FasterDecoding/medusa-vicuna-33b
 - Query the results
 
 ```
+export OPENAI_API_KEY=$OPENAI_API_KEYs # set the OpenAI API key
 python gen_judgement.py --model-list medusa-vicuna-7b-v1.3-0-temperature-0.0-posterior_threshold-0.09-posterior_alpha-0.3 
 ```
 
