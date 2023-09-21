@@ -24,4 +24,4 @@ train = ["bitsandbytes", "wandb", "scipy"]
 "Blog" = "https://sites.google.com/view/medusa-llm"
 
 [tool.setuptools.packages.find]
-exclude = ["assets*", "notebooks*", "scripts*"]
+exclude = ["assets*", "notebooks*", "scripts*", "llm_judge"]
