@@ -18,5 +18,5 @@
 - [ ] [lightllm](https://github.com/ModelTC/lightllm)
 
 ## Research
-- [ ] Optimize the tree-based attention to reduce additional computation
+- [x] Optimize the tree-based attention to reduce additional computation
 - [ ] Improve the acceptance scheme to generate more diverse sequences
