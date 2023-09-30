@@ -13,7 +13,7 @@ We report the 3 times running results of the Medusa X Vicuna v1.3 7/13/33b on a 
 
 
 ```
-export CUDA_VISIBLE_DEVICES= 0 # set the GPU id
+export CUDA_VISIBLE_DEVICES=0 # set the GPU id
 python gen_model_answer_medusa.py  --model-path FasterDecoding/medusa-vicuna-7b-v1.3 --model-id medusa-vicuna-7b-v1.3-0
 python gen_model_answer_medusa.py  --model-path FasterDecoding/medusa-vicuna-13b-v1.3 --model-id medusa-vicuna-13b-v1.3-0
 python gen_model_answer_medusa.py  --model-path FasterDecoding/medusa-vicuna-33b-v1.3 --model-id medusa-vicuna-33b-v1.3-0

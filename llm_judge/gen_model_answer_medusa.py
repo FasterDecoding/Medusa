@@ -22,7 +22,7 @@ import transformers
 from medusa.model.utils import *
 from medusa.model.medusa_model import MedusaModel
 from medusa.model.kv_cache import initialize_past_key_values
-from medusa.model.medusa_choices import medusa_choices
+from medusa.model.medusa_choices import *
 
 def medusa_forward(input_ids, model, tokenizer, medusa_choices, temperature, posterior_threshold, posterior_alpha, max_steps = 512):
     assert input_ids.shape[0] == 1, "Only support batch size 1 for now!!"
@@ -191,7 +191,7 @@ def get_model_answers(
     tokenizer = model.get_tokenizer()
     
     model.eval()
-    print('Check model state:',model.training)
+    print('Check model training state:',model.training)
     
     cuda_visible_devices = os.environ.get('CUDA_VISIBLE_DEVICES')
     print('CUDA VISIBLE DEVICES:', cuda_visible_devices)
@@ -456,6 +456,12 @@ if __name__ == "__main__":
         help="The posterior alpha for medusa sampling.",
     )
 
+    parser.add_argument(
+        "--medusa-choices",
+        type=str,
+        default="mc_sim_7b_63",
+        help="The medusa choices for medusa sampling.",
+    )
 
 
 
@@ -463,7 +469,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     args.model_id = args.model_id+"-temperature-"+str(args.temperature)+"-posterior_threshold-"+str(args.posterior_threshold)+"-posterior_alpha-"+str(args.posterior_alpha)
-    
+    args.medusa_choices = eval(args.medusa_choices)
     if args.num_gpus_total // args.num_gpus_per_model > 1:
         import ray
 
@@ -493,7 +499,7 @@ if __name__ == "__main__":
         args.temperature,
         args.posterior_threshold,
         args.posterior_alpha,
-        medusa_choices,
+        args.medusa_choices,
     )
 
     reorg_answer_file(answer_file)
