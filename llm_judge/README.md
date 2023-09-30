@@ -19,6 +19,9 @@ python gen_model_answer_medusa.py  --model-path FasterDecoding/medusa-vicuna-13b
 python gen_model_answer_medusa.py  --model-path FasterDecoding/medusa-vicuna-33b-v1.3 --model-id medusa-vicuna-33b-v1.3-0
 ```
 
+- Run baseline: replace `gen_model_answer_medusa.py` with `gen_model_answer_baseline.py` (Please note we only implement the greedy inference for wall-time comparison. If you want to use the sampling generator, please refer to the original repository.)
+
+
 - Query the results
 
 ```
