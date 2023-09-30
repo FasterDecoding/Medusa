@@ -170,5 +170,5 @@ test_medusa*
 # test
 notebooks/test*.ipynb
 notebooks/*.pdf
-*.sh
+llm_judge/*.sh
 llm_judge/data/mt_bench_test
