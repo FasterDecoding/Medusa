@@ -60,42 +60,47 @@ def medusa_forward(input_ids, model, tokenizer, medusa_choices, temperature, pos
 
     input_len = input_ids.shape[1]
     reset_medusa_mode(model)
-    medusa_logits, logits = initialize_medusa(
-            input_ids, model, medusa_buffers["medusa_attn_mask"], past_key_values
-    )
+    # medusa_logits, logits = initialize_medusa(
+    #         input_ids, model, medusa_buffers["medusa_attn_mask"], past_key_values
+    # )
+    outputs = model.base_model(input_ids, past_key_values = past_key_values, use_cache=True)
     new_token = 0
     
     for idx in range(max_steps): 
-        candidates, tree_candidates = generate_candidates(
-                medusa_logits,
-                logits,
-                medusa_buffers["tree_indices"],
-                medusa_buffers["retrieve_indices"],
-            )
-        medusa_logits, logits, outputs = tree_decoding(
-                model,
-                tree_candidates,
-                past_key_values,
-                medusa_buffers["medusa_position_ids"],
-                input_ids,
-                medusa_buffers["retrieve_indices"],
-            )
-        best_candidate, accept_length = evaluate_posterior(
-                logits, candidates, temperature, posterior_threshold, posterior_alpha
-            )
-        input_ids, logits, medusa_logits, new_token = update_inference_inputs(
-                input_ids,
-                candidates,
-                best_candidate,
-                accept_length,
-                medusa_buffers["retrieve_indices"],
-                outputs,
-                logits,
-                medusa_logits,
-                new_token,
-                past_key_values_data,
-                current_length_data,
-            )
+        # candidates, tree_candidates = generate_candidates(
+        #         medusa_logits,
+        #         logits,
+        #         medusa_buffers["tree_indices"],
+        #         medusa_buffers["retrieve_indices"],
+        #     )
+        # medusa_logits, logits, outputs = tree_decoding(
+        #         model,
+        #         tree_candidates,
+        #         past_key_values,
+        #         medusa_buffers["medusa_position_ids"],
+        #         input_ids,
+        #         medusa_buffers["retrieve_indices"],
+        #     )
+        # best_candidate, accept_length = evaluate_posterior(
+        #         logits, candidates, temperature, posterior_threshold, posterior_alpha
+        #     )
+        # input_ids, logits, medusa_logits, new_token = update_inference_inputs(
+        #         input_ids,
+        #         candidates,
+        #         best_candidate,
+        #         accept_length,
+        #         medusa_buffers["retrieve_indices"],
+        #         outputs,
+        #         logits,
+        #         medusa_logits,
+        #         new_token,
+        #         past_key_values_data,
+        #         current_length_data,
+        #     )
+        input_id = outputs.logits[:, -1:].argmax(dim=-1)
+        outputs = model.base_model(input_id, use_cache=True, past_key_values = past_key_values)
+        input_ids = torch.cat([input_ids, input_id], dim=-1)
+
         if tokenizer.eos_token_id in input_ids[0, input_len:].tolist():
             break
         if new_token > 1024:
@@ -468,7 +473,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    args.model_id = args.model_id+"-temperature-"+str(args.temperature)+"-posterior_threshold-"+str(args.posterior_threshold)+"-posterior_alpha-"+str(args.posterior_alpha)
+    args.model_id = args.model_id+"-greedy"
     args.medusa_choices = eval(args.medusa_choices)
     if args.num_gpus_total // args.num_gpus_per_model > 1:
         import ray
