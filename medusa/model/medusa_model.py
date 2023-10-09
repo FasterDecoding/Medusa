@@ -1,7 +1,8 @@
 import torch
 import torch.nn as nn
 from transformers import PreTrainedModel, PretrainedConfig
-from .modeling_llama_kv import LlamaForCausalLM as KVLlamaForCausalLM
+from .modeling_mistral import MistralForCausalLM as KVLlamaForCausalLM
+#from .modeling_llama_kv_434 import LlamaForCausalLM as KVLlamaForCausalLM
 from .utils import *
 from .kv_cache import initialize_past_key_values
 from .medusa_choices import mc_sim_7b_63
@@ -95,7 +96,7 @@ class MedusaModel(nn.Module):
         self.medusa = medusa_num_heads
         self.medusa_num_layers = medusa_num_layers
         self.base_model_name_or_path = base_model_name_or_path
-        self.tokenizer = AutoTokenizer.from_pretrained(self.base_model_name_or_path)
+        self.tokenizer = AutoTokenizer.from_pretrained(self.base_model_name_or_path, trust_remote_code=True)
         # Create a list of Medusa heads
         self.medusa_head = nn.ModuleList(
             [
