@@ -11,7 +11,6 @@ import time
 import shortuuid
 import torch
 from tqdm import tqdm
-import numpy as np
 
 from fastchat.llm_judge.common import load_questions, temperature_config
 from fastchat.model import load_model, get_conversation_template
@@ -25,7 +24,6 @@ from medusa.model.medusa_model import MedusaModel
 from medusa.model.kv_cache import initialize_past_key_values
 from medusa.model.medusa_choices import *
 
-medusa_choices = mc_sim_7b_63
 
 def medusa_forward(input_ids, model, tokenizer, medusa_choices, temperature, posterior_threshold, posterior_alpha, max_steps = 512):
     assert input_ids.shape[0] == 1, "Only support batch size 1 for now!!"
@@ -215,10 +213,10 @@ def get_model_answers(
             prompt = conv.get_prompt()
             input_ids = tokenizer([prompt]).input_ids
 
-            if temperature < 1e-4:
-                do_sample = False
-            else:
-                do_sample = True
+            #if temperature < 1e-4:
+            #    do_sample = False
+            #else:
+            #    do_sample = True
 
             # some models may error out when generating long outputs
             try:
