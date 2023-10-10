@@ -87,10 +87,20 @@ def initialize_past_key_values(model):
     # Initializing the batch size to 1, this can be modified if different batch sizes are required
     batch_size = 1
     # Initializing a tensor to store past keys and values for all layers
-    past_key_values_data = torch.zeros(
+    '''past_key_values_data = torch.zeros(
         config.num_hidden_layers * 2,
         batch_size,
         config.num_attention_heads,
+        config.max_position_embeddings,
+        config.hidden_size // config.num_attention_heads,
+        device=model.device,
+        dtype=model.dtype,
+    )'''
+    # MODIFIED
+    past_key_values_data = torch.zeros(
+        config.num_hidden_layers * 2,
+        batch_size,
+        config.num_key_value_heads,
         config.max_position_embeddings,
         config.hidden_size // config.num_attention_heads,
         device=model.device,

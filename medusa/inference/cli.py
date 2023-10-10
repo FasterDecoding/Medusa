@@ -48,7 +48,10 @@ def main(args):
         conv = None
 
         def new_chat():
-            return get_conversation_template("vicuna")
+            template = "vicuna"
+            if "mistral" in args.model.lower():
+                template = "mistral"
+            return get_conversation_template(template)
 
         def reload_conv(conv):
             """
