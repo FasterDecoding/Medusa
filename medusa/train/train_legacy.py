@@ -35,7 +35,7 @@ from fastchat.model.model_adapter import get_conversation_template
 from torch.nn import CrossEntropyLoss
 from torch.nn import functional as F
 import os
-from medusa.model.medusa_model import MedusaModel, MedusaConfig
+from medusa.model.medusa_model_legacy import MedusaModel, MedusaConfig
 
 IGNORE_TOKEN_ID = LabelSmoother.ignore_index
 

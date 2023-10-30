@@ -143,7 +143,7 @@ def initialize_medusa(input_ids, model, medusa_attn_mask, past_key_values):
     - logits (torch.Tensor): Original logits from the base model.
     """
     medusa_logits, outputs, logits = model(
-        input_ids, past_key_values=past_key_values, output_orig=True
+        input_ids, past_key_values=past_key_values, output_orig=True, medusa_forward=True
     )
     model.base_model.model.medusa_mask = medusa_attn_mask
     return medusa_logits, logits
@@ -263,6 +263,7 @@ def tree_decoding(
         output_orig=True,
         past_key_values=past_key_values,
         position_ids=position_ids,
+        medusa_forward=True,
     )
     
     # Reorder the obtained logits based on the retrieve_indices to ensure consistency with some reference ordering.
