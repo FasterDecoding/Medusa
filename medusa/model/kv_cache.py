@@ -90,7 +90,7 @@ def initialize_past_key_values(model):
     past_key_values_data = torch.zeros(
         config.num_hidden_layers * 2,
         batch_size,
-        config.num_attention_heads,
+        config.num_key_value_heads,
         config.max_position_embeddings,
         config.hidden_size // config.num_attention_heads,
         device=model.device,

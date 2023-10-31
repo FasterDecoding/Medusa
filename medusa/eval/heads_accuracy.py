@@ -36,7 +36,7 @@ def main(args):
 
 
     data = json.load(open(args.data_path))
-    past_key_values, past_key_values_data, current_length_data = initialize_past_key_values(model.base_model, model.medusa_num_decoder_layers)
+    past_key_values, past_key_values_data, current_length_data = initialize_past_key_values(model.base_model)
     model.past_key_values = past_key_values
     model.past_key_values_data = past_key_values_data
     model.current_length_data = current_length_data
