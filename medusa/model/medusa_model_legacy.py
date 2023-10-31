@@ -2,13 +2,36 @@ import torch
 import torch.nn as nn
 from transformers import PreTrainedModel, PretrainedConfig
 from .modeling_llama_kv import LlamaForCausalLM as KVLlamaForCausalLM
-from .modeling_mistral_kv import MistralForCausalLM as KVMistralForCausalLM
 from .utils import *
 from .kv_cache import initialize_past_key_values
 from .medusa_choices import mc_sim_7b_63
-from transformers import AutoTokenizer, AutoConfig
+from transformers import AutoTokenizer
 import os
 from huggingface_hub import hf_hub_download
+
+
+class MedusaConfig(PretrainedConfig):
+    """
+    Configuration class for Medusa model.
+
+    Args:
+        medusa_num_heads (int, optional): Number of heads for the Medusa layer. Default is 2.
+        medusa_num_layers (int, optional): Number of Medusa layers. Default is 1.
+        base_model_name_or_path (str, optional): The name or path of the base model. Default is "lmsys/vicuna-7b-v1.3".
+        **kwargs: Additional keyword arguments to be passed to the parent class constructor.
+    """
+
+    def __init__(
+        self,
+        medusa_num_heads=4,
+        medusa_num_layers=1,
+        base_model_name_or_path="lmsys/vicuna-7b-v1.3",
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.medusa_num_heads = medusa_num_heads
+        self.medusa_num_layers = medusa_num_layers
+        self.base_model_name_or_path = base_model_name_or_path
 
 
 class ResBlock(nn.Module):
@@ -42,7 +65,8 @@ class ResBlock(nn.Module):
         """
         return x + self.act(self.linear(x))
 
-class MedusaLlamaModel(KVLlamaForCausalLM):
+
+class MedusaModel(nn.Module):
     """The Medusa Language Model Head.
 
     This module creates a series of prediction heads (based on the 'medusa' parameter)
@@ -52,21 +76,22 @@ class MedusaLlamaModel(KVLlamaForCausalLM):
 
     def __init__(
         self,
-        config,
+        base_model,
+        medusa_num_heads=4,
+        medusa_num_layers=1,
+        base_model_name_or_path="lmsys/vicuna-7b-v1.3",
     ):
         """
         Args:
-            config (PretrainedConfig): The configuration of the MedusaModel.
-        """   
-        # Load the base model
-        super().__init__(config)
-        # For compatibility with the old APIs
-
-        medusa_num_heads = config.medusa_num_heads
-        medusa_num_layers = config.medusa_num_layers
-        base_model_name_or_path = config._name_or_path
-        self.hidden_size = config.hidden_size
-        self.vocab_size = config.vocab_size
+            base_model (nn.Module): The base language model to be used.
+            medusa_num_heads (int, optional): Number of additional tokens to predict. Defaults to 3.
+            medusa_num_layers (int, optional): Number of ResBlock layers for each Medusa head. Defaults to 0.
+        """
+        super().__init__()
+        self.base_model = base_model
+        self.config = base_model.config
+        self.hidden_size = base_model.lm_head.weight.shape[-1]  
+        self.vocab_size = base_model.lm_head.weight.shape[0]
         self.medusa = medusa_num_heads
         self.medusa_num_layers = medusa_num_layers
         self.base_model_name_or_path = base_model_name_or_path
@@ -82,11 +107,13 @@ class MedusaLlamaModel(KVLlamaForCausalLM):
             ]
         )
 
-    # Add a link named base_model to self
-    @property
-    def base_model(self):
-        return self
-        
+        # Ensure medusa_head's dtype and device align with the base_model
+        self.medusa_head.to(self.base_model.dtype).to(self.base_model.device)
+
+        for i in range(medusa_num_heads):
+            # Initialize the weights of each medusa_head using the base model's weights
+            self.medusa_head[i][-1].weight.data[:] = base_model.lm_head.weight.data[:]
+
     def get_tokenizer(self):
         """Get the tokenizer of the base model.
 
@@ -94,32 +121,59 @@ class MedusaLlamaModel(KVLlamaForCausalLM):
             Tokenizer: The tokenizer of the base model.
         """
         return self.tokenizer
-    
+
     @classmethod
     def from_pretrained(
         cls,
-        pretrained_model_name_or_path,
-        *args,
+        medusa_head_name_or_path,
+        base_model=None,
+        medusa_num_heads=None,
         **kwargs,
     ):
-        # Manually load config to ensure that the medusa_num_heads parameter is loaded
-        config = AutoConfig.from_pretrained(pretrained_model_name_or_path)
-        return super().from_pretrained(
-            pretrained_model_name_or_path,
-            *args,
-            **kwargs,
-            config=config,
+        """
+        Args:
+            medusa_head_name_or_path (str): Name or path of the Medusa head to load.
+            **kwargs: Additional keyword arguments for loading the base model.
+
+        Returns:
+            MedusaModel: A MedusaModel instance loaded from the given path.
+        """
+        medusa_config = MedusaConfig.from_pretrained(medusa_head_name_or_path)
+        if medusa_num_heads is not None:
+            print("Overriding medusa_num_heads as:", medusa_num_heads)
+            medusa_config.medusa_num_heads = medusa_num_heads
+        if base_model is not None:
+            print("Overriding base_model as:", base_model)
+            medusa_config.base_model_name_or_path = base_model
+            
+        base_model = KVLlamaForCausalLM.from_pretrained(
+            medusa_config.base_model_name_or_path, **kwargs
         )
+
+        model = cls(
+            base_model,
+            medusa_config.medusa_num_heads,
+            medusa_config.medusa_num_layers,
+            medusa_config.base_model_name_or_path,
+        )
+        medusa_head_path = os.path.join(medusa_head_name_or_path, "medusa_lm_head.pt")
+        if os.path.exists(medusa_head_path):
+            filename = medusa_head_path
+        else:
+            filename = hf_hub_download(medusa_head_name_or_path, "medusa_lm_head.pt")
+        medusa_head_state_dict = torch.load(filename, map_location=base_model.device)
+        model.medusa_head.load_state_dict(medusa_head_state_dict, strict=False)
+
+        return model
 
     def forward(
         self,
         input_ids=None,
         attention_mask=None,
+        labels=None,
         past_key_values=None,
         output_orig=False,
         position_ids=None,
-        medusa_forward=False,
-        **kwargs,
     ):
         """Forward pass of the MedusaModel.
 
@@ -135,14 +189,6 @@ class MedusaLlamaModel(KVLlamaForCausalLM):
             torch.Tensor: A tensor containing predictions from all Medusa heads.
             (Optional) Original predictions from the base model's LM head.
         """
-        if not medusa_forward:
-            return super().forward(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                past_key_values=past_key_values,
-                position_ids=position_ids,
-                **kwargs,
-            )
         with torch.inference_mode():
             # Pass input through the base model
             outputs = self.base_model.model(
@@ -150,7 +196,6 @@ class MedusaLlamaModel(KVLlamaForCausalLM):
                 attention_mask=attention_mask,
                 past_key_values=past_key_values,
                 position_ids=position_ids,
-                **kwargs,
             )
             if output_orig:
                 orig = self.base_model.lm_head(outputs[0])
@@ -285,6 +330,3 @@ class MedusaLlamaModel(KVLlamaForCausalLM):
 
             if self.tokenizer.eos_token_id in input_ids[0, input_len:]:
                 break
-
-# Currently only support LlamaModel
-MedusaModel = MedusaLlamaModel
