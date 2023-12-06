@@ -1,14 +1,8 @@
 import torch
 import torch.nn as nn
+from transformers import PreTrainedModel, PretrainedConfig
 from .modeling_llama_kv import LlamaForCausalLM as KVLlamaForCausalLM
 from .modeling_mistral_kv import MistralForCausalLM as KVMistralForCausalLM
-# import transformers
-
-# # monkey patch
-# transformers.models.llama.modeling_llama.LlamaForCausalLM = KVLlamaForCausalLM
-# transformers.models.mistral.modeling_mistral.MistralForCausalLM = KVMistralForCausalLM
-
-from transformers import PreTrainedModel, PretrainedConfig
 from .utils import *
 from .kv_cache import initialize_past_key_values
 from .medusa_choices import mc_sim_7b_63
@@ -48,21 +42,13 @@ class ResBlock(nn.Module):
         """
         return x + self.act(self.linear(x))
 
-
-class MedusaModelABC(nn.Module):
+class MedusaModel(PreTrainedModel):
     """The Medusa Language Model Head.
 
     This module creates a series of prediction heads (based on the 'medusa' parameter)
     on top of a given base model. Each head is composed of a sequence of residual blocks
     followed by a linear layer.
     """
-
-    # Load the base model
-    # base_model_prefix = "model"
-    # supports_gradient_checkpointing = True
-    # _no_split_modules = ["LlamaDecoderLayer", "MistralDecoderLayer"]
-    # _skip_keys_device_placement = "past_key_values"
-    # _supports_flash_attn_2 = True
 
     def __init__(
         self,
@@ -72,6 +58,143 @@ class MedusaModelABC(nn.Module):
         Args:
             config (PretrainedConfig): The configuration of the MedusaModel.
         """
+        super().__init__(config)
+        # For compatibility with the old APIs
+        medusa_num_heads = config.medusa_num_heads
+        medusa_num_layers = config.medusa_num_layers
+        base_model_name_or_path = config._name_or_path
+        self.hidden_size = config.hidden_size
+        self.vocab_size = config.vocab_size
+        self.medusa = medusa_num_heads
+        self.medusa_num_layers = medusa_num_layers
+        self.base_model_name_or_path = base_model_name_or_path
+        self.tokenizer = AutoTokenizer.from_pretrained(self.base_model_name_or_path)
+        # Create a list of Medusa heads
+        self.medusa_head = nn.ModuleList(
+            [
+                nn.Sequential(
+                    *([ResBlock(self.hidden_size)] * medusa_num_layers),
+                    nn.Linear(self.hidden_size, self.vocab_size, bias=False),
+                )
+                for _ in range(medusa_num_heads)
+            ]
+        )
+
+    # Add a link named base_model to self
+    @property
+    def base_model(self):
+        return self
+
+    def get_tokenizer(self):
+        """Get the tokenizer of the base model.
+
+        Returns:
+            Tokenizer: The tokenizer of the base model.
+        """
+        return self.tokenizer
+
+    @classmethod
+    def from_pretrained(
+        cls,
+        pretrained_model_name_or_path,
+        *args,
+        **kwargs,
+    ):
+        # Manually load config to ensure that the medusa_num_heads parameter is loaded
+        config = AutoConfig.from_pretrained(pretrained_model_name_or_path)
+        return super().from_pretrained(
+            pretrained_model_name_or_path,
+            *args,
+            **kwargs,
+            config=config,
+        )
+
+    def forward(
+        self,
+        input_ids=None,
+        attention_mask=None,
+        past_key_values=None,
+        output_orig=False,
+        position_ids=None,
+        medusa_forward=False,
+        **kwargs,
+    ):
+        """Forward pass of the MedusaModel.
+
+        Args:
+            input_ids (torch.Tensor, optional): Input token IDs.
+            attention_mask (torch.Tensor, optional): Attention mask.
+            labels (torch.Tensor, optional): Ground truth labels for loss computation.
+            past_key_values (tuple, optional): Tuple containing past key and value states for attention.
+            output_orig (bool, optional): Whether to also output predictions from the original LM head.
+            position_ids (torch.Tensor, optional): Position IDs.
+
+        Returns:
+            torch.Tensor: A tensor containing predictions from all Medusa heads.
+            (Optional) Original predictions from the base model's LM head.
+        """
+        """Forward pass of the MedusaModel.
+
+        Args:
+            input_ids (torch.Tensor, optional): Input token IDs.
+            attention_mask (torch.Tensor, optional): Attention mask.
+            labels (torch.Tensor, optional): Ground truth labels for loss computation.
+            past_key_values (tuple, optional): Tuple containing past key and value states for attention.
+            output_orig (bool, optional): Whether to also output predictions from the original LM head.
+            position_ids (torch.Tensor, optional): Position IDs.
+
+        Returns:
+            torch.Tensor: A tensor containing predictions from all Medusa heads.
+            (Optional) Original predictions from the base model's LM head.
+        """
+        if not medusa_forward:
+            return super().forward(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                past_key_values=past_key_values,
+                position_ids=position_ids,
+                **kwargs,
+            )
+        with torch.inference_mode():
+            # Pass input through the base model
+            outputs = self.base_model.model(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                past_key_values=past_key_values,
+                position_ids=position_ids,
+                **kwargs,
+            )
+            if output_orig:
+                orig = self.base_model.lm_head(outputs[0])
+        # Clone the output hidden states
+        hidden_states = outputs[0].clone()
+        medusa_logits = []
+        # TODO: Consider parallelizing this loop for efficiency?
+        for i in range(self.medusa):
+            medusa_logits.append(self.medusa_head[i](hidden_states))
+        if output_orig:
+            return torch.stack(medusa_logits, dim=0), outputs, orig
+        return torch.stack(medusa_logits, dim=0)
+
+
+
+class MedusaLlamaModel(KVLlamaForCausalLM):
+    """The Medusa Language Model Head.
+
+    This module creates a series of prediction heads (based on the 'medusa' parameter)
+    on top of a given base model. Each head is composed of a sequence of residual blocks
+    followed by a linear layer.
+    """
+
+    def __init__(
+        self,
+        config,
+    ):
+        """
+        Args:
+            config (PretrainedConfig): The configuration of the MedusaModel.
+        """   
+        # Load the base model
         super().__init__(config)
         # For compatibility with the old APIs
 
@@ -94,10 +217,20 @@ class MedusaModelABC(nn.Module):
                 for _ in range(medusa_num_heads)
             ]
         )
+
     # Add a link named base_model to self
     @property
     def base_model(self):
         return self
+        
+    def get_tokenizer(self):
+        """Get the tokenizer of the base model.
+
+        Returns:
+            Tokenizer: The tokenizer of the base model.
+        """
+        return self.tokenizer
+    
     @classmethod
     def from_pretrained(
         cls,
@@ -113,15 +246,6 @@ class MedusaModelABC(nn.Module):
             **kwargs,
             config=config,
         )
-
-    def get_tokenizer(self):
-        """Get the tokenizer of the base model.
-
-        Returns:
-            Tokenizer: The tokenizer of the base model.
-        """
-        return self.tokenizer
-
 
     def forward(
         self,
@@ -218,6 +342,7 @@ class MedusaModelABC(nn.Module):
         self.medusa_buffers = medusa_buffers
         self.medusa_choices = medusa_choices
 
+
         # Initialize the past key and value states
         if hasattr(self, "past_key_values"):
             past_key_values = self.past_key_values
@@ -297,35 +422,5 @@ class MedusaModelABC(nn.Module):
             if self.tokenizer.eos_token_id in input_ids[0, input_len:]:
                 break
 
-
-class MedusaModelLlama(MedusaModelABC, KVLlamaForCausalLM):
-    pass
-
-class MedusaModelMistral(MedusaModelABC, KVMistralForCausalLM):
-    pass
-
-
-class MedusaModel():
-    @classmethod
-    def from_pretrained(
-        cls,
-        pretrained_model_name_or_path,
-        *args,
-        **kwargs,
-    ):
-        # Manually load config to ensure that the medusa_num_heads parameter is loaded
-        config = AutoConfig.from_pretrained(pretrained_model_name_or_path)
-        if config.model_type == "llama":
-            return MedusaModelLlama.from_pretrained(
-                pretrained_model_name_or_path,
-                *args,
-                **kwargs,
-            )
-        elif config.model_type == "mistral":
-            return MedusaModelMistral.from_pretrained(
-                pretrained_model_name_or_path,
-                *args,
-                **kwargs,
-            )
-        else:
-            raise ValueError("Only support llama and mistral for now!!")
+# Currently only support LlamaModel
+MedusaModel = MedusaLlamaModel
