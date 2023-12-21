@@ -1,7 +1,7 @@
 import torch
 import torch.nn.functional as F
 
-TOPK=10 # topk for sparse tree
+TOPK=10 # topk for sparse tree (10 is a placeholder and it is sufficient)
 
 def pad_path(path, length, pad_value=-2):
     """
@@ -168,7 +168,7 @@ def reset_medusa_mode(
     - past_key_values (list of torch.Tensor): Contains past hidden states and past attention values.
 
     Returns:
-    - past_key_values (list of torch.Tensor): Updated past hidden states and past attention values with reset lengths.
+    - None
     """
     model.base_model.model.medusa_mask = None
     model.base_model.model.medusa_mode = None
@@ -194,8 +194,25 @@ def reset_past_key_values(passed_key_values):
     return passed_key_values
 
 def get_nucleus_one_token(logit, temperature, top_p):
-    # input [nxC]
-    logit = logit[:, :-1] / temperature
+    """
+    Performs token sampling based on the nucleus (top-p) sampling method.
+
+    This function selects a token from a given logit distribution using the nucleus sampling strategy.
+    It allows for more controlled and diverse generation compared to traditional top-k sampling.
+
+    Args:
+        logit (torch.Tensor): The logits from a language model output, expected to be a 2D tensor (BxC).
+        temperature (float): A temperature parameter to control the randomness in sampling.
+                             Higher values increase diversity, lower values make selections more deterministic.
+        top_p (float): The cumulative probability threshold for nucleus sampling.
+                       It controls the size of the set of high-probability tokens to consider for sampling.
+
+    Returns:
+        torch.Tensor: A tensor containing the indices of the sampled tokens.
+    """
+    if top_p >= 1:
+        return torch.multinomial(F.softmax(logit / temperature, dim=-1), 1)
+    logit = logit / temperature
     probs = torch.softmax(logit, dim=-1)
     sorted_logits, sorted_indices = torch.sort(probs, descending=True)
     cum_probs = torch.cumsum(sorted_logits, dim=-1)
@@ -208,8 +225,23 @@ def get_nucleus_one_token(logit, temperature, top_p):
     return sampled_tokens
 
 def get_typical_one_token(logit, temperature, posterior_threshold, posterior_alpha):
-    # input [nxC]
-    logit = logit[:, :-1] / temperature
+    """
+    Implements token sampling based on the typical sampling method.
+
+    This function selects a token from a given logit distribution using the typical sampling strategy,
+    aiming to balance between diversity and likelihood in a more nuanced way compared to traditional methods.
+
+    Args:
+        logit (torch.Tensor): The logits from a language model output, expected to be a 2D tensor.
+        temperature (float): A parameter to control the randomness in sampling.
+                              Higher values increase diversity, lower values make selections more deterministic.
+        posterior_threshold (float): A threshold to decide the lower bound of probabilities to be considered for sampling.
+        posterior_alpha (float): A scaling factor applied to the entropy-based adaptive threshold.
+
+    Returns:
+        torch.Tensor: A tensor containing the indices of the sampled tokens.
+    """
+    logit = logit / temperature
     probs = torch.softmax(logit, dim=-1)
     entropy = -torch.sum(
             probs * torch.log(probs + 1e-5), dim=-1
@@ -228,15 +260,22 @@ def generate_candidates(medusa_logits, logits, tree_indices, retrieve_indices, t
     Generate candidates based on provided logits and indices.
     
     Parameters:
-    - medusa_logits (torch.Tensor): Logits associated with the Medusa structure.
-    - logits (torch.Tensor): Original logits.
-    - tree_indices (list or torch.Tensor): Indices associated with a tree structure.
-    - retrieve_indices (list or torch.Tensor): Indices for retrieving candidates.
-    
-    Returns:
-    - tuple: Returns cartesian candidates and tree candidates.
-    """
+    - medusa_logits (torch.Tensor): Logits from a specialized Medusa structure, aiding in candidate selection.
+    - logits (torch.Tensor): Standard logits from a language model.
+    - tree_indices (list or torch.Tensor): Indices representing a tree structure, used for mapping candidates.
+    - retrieve_indices (list or torch.Tensor): Indices for extracting specific candidate tokens.
+    - temperature (float, optional): Controls the diversity of the sampling process. Defaults to 0.
+    - posterior_threshold (float, optional): Threshold for typical sampling. Defaults to 0.3.
+    - posterior_alpha (float, optional): Scaling factor for the entropy-based threshold in typical sampling. Defaults to 0.09.
+    - top_p (float, optional): Cumulative probability threshold for nucleus sampling. Defaults to 0.8.
+    - sampling (str, optional): Defines the sampling strategy ('typical' or 'nucleus'). Defaults to 'typical'.
+    - fast (bool, optional): If True, enables faster, deterministic decoding for typical sampling. Defaults to False.
 
+    Returns:
+    - tuple (torch.Tensor, torch.Tensor): A tuple containing two sets of candidates:
+        1. Cartesian candidates derived from the combined original and Medusa logits.
+        2. Tree candidates mapped from the Cartesian candidates using tree indices.
+    """
     # Greedy decoding: Select the most probable candidate from the original logits.
     if temperature == 0 or fast:
         candidates_logit = torch.argmax(logits[:, -1]).unsqueeze(0)
@@ -309,16 +348,33 @@ def tree_decoding(
     return medusa_logits, logits, outputs
 
 def get_nucleus_posterior_mask(logits, candidates, temperature, top_p):
+    """
+    Generates a posterior mask for token candidates using nucleus (top-p) sampling.
 
+    This function applies nucleus sampling to a set of logits, and then generates a mask indicating 
+    which candidate tokens are selected. It adapts the sampling strategy to accommodate for 
+    temperature scaling and cumulative probability thresholding.
+
+    Args:
+        logits (torch.Tensor): A tensor of logits from a language model output.
+        candidates (torch.Tensor): A tensor of candidate tokens to compare against sampled tokens.
+        temperature (float): A parameter to scale the logits, controlling randomness in sampling.
+        top_p (float): The cumulative probability threshold for nucleus sampling.
+
+    Returns:
+        torch.Tensor: A posterior mask indicating which candidate tokens match the sampled tokens.
+    """
     # adapted from https://github.com/huggingface/transformers/blob/18a879f47576822aa1a5c49aecb27d89bfa5fa69/examples/run_generation.py#L79
 
     # Apply temperature
-    
     logits = logits[:, :-1] / temperature
-
     n_samples, n_tokens = logits.shape[0], logits.shape[1]
     logits = logits.view(n_samples*n_tokens, -1)
-
+    if top_p >= 1:
+        sampled_tokens = torch.multinomial(F.softmax(logits, dim=-1), 1)
+        sampled_tokens = sampled_tokens.view(n_samples, n_tokens)
+        posterior_mask = (candidates[:, 1:] == sampled_tokens).int()
+        return posterior_mask
     # Convert to probabilities (softmax)
     probs = F.softmax(logits, dim=-1)
     # Sort the probabilities
@@ -346,6 +402,17 @@ def get_nucleus_posterior_mask(logits, candidates, temperature, top_p):
     return posterior_mask
 
 def get_typical_posterior_mask(logits, candidates, temperature, posterior_threshold, posterior_alpha):
+    """
+    Args:
+        logits (torch.Tensor): A tensor of logits from a language model output.
+        candidates (torch.Tensor): A tensor of candidate tokens to compare against sampled tokens.
+        temperature (float): A parameter to scale the logits, controlling randomness in sampling.
+        posterior_threshold (float): The minimum threshold for probabilities to be considered in sampling.
+        posterior_alpha (float): A scaling factor applied to the entropy-based adaptive threshold.
+
+    Returns:
+        torch.Tensor: A posterior mask indicating which candidate tokens match the sampled tokens.
+    """
     logits = logits[:, :-1] / temperature
     n_samples, n_tokens = logits.shape[0], logits.shape[1]
     logits = logits.view(n_samples*n_tokens, -1)
@@ -381,7 +448,9 @@ def evaluate_posterior(
     - temperature (float): Softmax temperature for probability scaling. A value of 0 indicates greedy decoding.
     - posterior_threshold (float): Threshold for posterior probability.
     - posterior_alpha (float): Scaling factor for the threshold.
-
+    - top_p (float, optional): Cumulative probability threshold for nucleus sampling. Defaults to 0.8.
+    - sampling (str, optional): Defines the sampling strategy ('typical' or 'nucleus'). Defaults to 'typical'.
+    - fast (bool, optional): If True, enables faster, deterministic decoding for typical sampling. Defaults to False.
     Returns:
     - best_candidate (torch.Tensor): Index of the chosen best candidate.
     - accept_length (int): Length of the accepted candidate sequence.

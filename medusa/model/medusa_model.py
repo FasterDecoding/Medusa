@@ -188,6 +188,9 @@ class MedusaModelABC(nn.Module):
         posterior_threshold=0.09,  # threshold validation of Medusa output
         # another threshold hyperparameter, recommended to be sqrt(posterior_threshold)
         posterior_alpha=0.3,
+        top_p=0.8, 
+        sampling = 'typical', 
+        fast = True
     ):
         """
         Args:
@@ -197,6 +200,9 @@ class MedusaModelABC(nn.Module):
             medusa_choices (list, optional): A list of integers indicating the number of choices for each Medusa head.
             posterior_threshold (float, optional): Threshold for posterior validation.
             posterior_alpha (float, optional): Another threshold hyperparameter, recommended to be sqrt(posterior_threshold).
+            top_p (float, optional): Cumulative probability threshold for nucleus sampling. Defaults to 0.8.
+            sampling (str, optional): Defines the sampling strategy ('typical' or 'nucleus'). Defaults to 'typical'.
+            fast (bool, optional): If True, enables faster, deterministic decoding for typical sampling. Defaults to False.
         Returns:
             torch.Tensor: Output token IDs.
 
@@ -253,6 +259,12 @@ class MedusaModelABC(nn.Module):
                 logits,
                 medusa_buffers["tree_indices"],
                 medusa_buffers["retrieve_indices"],
+                temperature=temperature,
+                posterior_alpha=posterior_alpha,
+                posterior_threshold=posterior_threshold,
+                top_p=top_p,
+                sampling=sampling,
+                fast=fast,
             )
 
             # Use tree attention to verify the candidates and get predictions
@@ -267,7 +279,7 @@ class MedusaModelABC(nn.Module):
 
             # Evaluate the posterior of the candidates to select the accepted candidate prefix
             best_candidate, accept_length = evaluate_posterior(
-                logits, candidates, temperature, posterior_threshold, posterior_alpha
+                logits, candidates, temperature, posterior_threshold, posterior_alpha, top_p=top_p, sampling=sampling, fast=fast
             )
 
             # Update the input_ids and logits
