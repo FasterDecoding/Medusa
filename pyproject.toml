@@ -13,7 +13,7 @@ classifiers = [
     "License :: OSI Approved :: Apache Software License",
 ]
 dependencies = [
-    "fschat", "torch", "transformers", "accelerate", "sentencepiece", "protobuf"
+    "fschat", "torch", "transformers>=4.34", "accelerate", "sentencepiece", "protobuf"
 ]
 
 [project.optional-dependencies]
