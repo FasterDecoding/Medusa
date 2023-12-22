@@ -16,6 +16,28 @@ from transformers import AutoTokenizer, AutoConfig
 import os
 from huggingface_hub import hf_hub_download
 
+class MedusaConfig(PretrainedConfig):
+    """
+    Configuration class for Medusa model.
+
+    Args:
+        medusa_num_heads (int, optional): Number of heads for the Medusa layer. Default is 2.
+        medusa_num_layers (int, optional): Number of Medusa layers. Default is 1.
+        base_model_name_or_path (str, optional): The name or path of the base model. Default is "lmsys/vicuna-7b-v1.3".
+        **kwargs: Additional keyword arguments to be passed to the parent class constructor.
+    """
+
+    def __init__(
+        self,
+        medusa_num_heads=5,
+        medusa_num_layers=1,
+        base_model_name_or_path="lmsys/vicuna-7b-v1.3",
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.medusa_num_heads = medusa_num_heads
+        self.medusa_num_layers = medusa_num_layers
+        self.base_model_name_or_path = base_model_name_or_path
 
 class ResBlock(nn.Module):
     """
@@ -106,13 +128,34 @@ class MedusaModelABC(nn.Module):
         **kwargs,
     ):
         # Manually load config to ensure that the medusa_num_heads parameter is loaded
-        config = AutoConfig.from_pretrained(pretrained_model_name_or_path)
-        return super().from_pretrained(
-            pretrained_model_name_or_path,
-            *args,
-            **kwargs,
-            config=config,
-        )
+        try:
+            config = AutoConfig.from_pretrained(pretrained_model_name_or_path)
+            return super().from_pretrained(
+                pretrained_model_name_or_path,
+                *args,
+                **kwargs,
+                config=config,
+            )
+        except:
+            config = MedusaConfig.from_pretrained(pretrained_model_name_or_path)
+            base_model_config = AutoConfig.from_pretrained(config.base_model_name_or_path)
+            base_model_config.medusa_num_heads = 5 # TODO: fix the uploaded config (only include 2 heads)
+            base_model_config.medusa_num_layers = config.medusa_num_layers
+            model = super().from_pretrained(
+                config.base_model_name_or_path,
+                *args,
+                **kwargs,
+                config=base_model_config,
+            )
+            medusa_head_path = os.path.join(pretrained_model_name_or_path, "medusa_lm_head.pt")
+            if os.path.exists(medusa_head_path):
+                filename = medusa_head_path
+            else:
+                filename = hf_hub_download(pretrained_model_name_or_path, "medusa_lm_head.pt")
+            medusa_head_state_dict = torch.load(filename, map_location=model.device)
+            model.medusa_head.load_state_dict(medusa_head_state_dict, strict=False)
+            return model
+        
 
     def get_tokenizer(self):
         """Get the tokenizer of the base model.
@@ -326,7 +369,14 @@ class MedusaModel():
         **kwargs,
     ):
         # Manually load config to ensure that the medusa_num_heads parameter is loaded
-        config = AutoConfig.from_pretrained(pretrained_model_name_or_path)
+        try:
+            config = AutoConfig.from_pretrained(pretrained_model_name_or_path)
+        except:
+            # MEDUSA-v0.1 load
+            config = MedusaConfig.from_pretrained(pretrained_model_name_or_path)
+            base_model_config = AutoConfig.from_pretrained(config.base_model_name_or_path)
+            config.model_type = base_model_config.model_type
+
         if config.model_type == "llama":
             return MedusaModelLlama.from_pretrained(
                 pretrained_model_name_or_path,
