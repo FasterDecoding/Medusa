@@ -27,7 +27,7 @@ def get_accuracies(medusa, logit):
 def main(args):
     model = MedusaModel.from_pretrained(
         args.model_path,
-        medusa_num_heads=args.medusa_num_heads,
+        # medusa_num_heads=args.medusa_num_heads,
         torch_dtype=torch.float16,
         low_cpu_mem_usage=True,
         device_map="auto"
@@ -58,7 +58,7 @@ def main(args):
             model.current_length_data.zero_() # this is for rerun
             reset_medusa_mode(model)
             medusa_logits, outputs, logits = model(
-                input_ids, past_key_values=past_key_values, output_orig=True
+                input_ids, past_key_values=past_key_values, output_orig=True, medusa_forward=True
             )
             _, medusa_topk = medusa_logits[...,-1,:].topk(20, dim=-1)
             input_id = logits[:, -1:].argmax(dim=-1)
@@ -66,7 +66,7 @@ def main(args):
             medusa_topk_ids.append(medusa_topk.detach().cpu())
             for _ in range(steps):
                 medusa_logits, outputs, logits = model(
-                    input_id, past_key_values=past_key_values, output_orig=True
+                    input_id, past_key_values=past_key_values, output_orig=True, medusa_forward=True
                 )
                 _, medusa_topk = medusa_logits[...,-1,:].topk(20, dim=-1)
                 input_id = logits[:, -1:].argmax(dim=-1)
