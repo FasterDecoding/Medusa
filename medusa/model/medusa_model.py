@@ -11,10 +11,11 @@ from .modeling_mistral_kv import MistralForCausalLM as KVMistralForCausalLM
 from transformers import PreTrainedModel, PretrainedConfig
 from .utils import *
 from .kv_cache import initialize_past_key_values
-from .medusa_choices import mc_sim_7b_63
+from .medusa_choices import *
 from transformers import AutoTokenizer, AutoConfig
 import os
 from huggingface_hub import hf_hub_download
+import warnings
 
 class MedusaConfig(PretrainedConfig):
     """
@@ -218,6 +219,18 @@ class MedusaModelABC(nn.Module):
         if output_orig:
             return torch.stack(medusa_logits, dim=0), outputs, orig
         return torch.stack(medusa_logits, dim=0)
+    def get_medusa_choice(self, model_name):
+        if 'vicuna' in model_name:
+            if '7b' in model_name:
+                return vicuna_7b_stage2
+            elif '13b' in model_name:
+                return vicuna_13b_stage2
+            elif '33b' in model_name:
+                return vicuna_33b_stage2
+        elif 'zephyr' in model_name:
+            return zephyr_stage2
+        warnings.warn('Please specify medusa choice configuration!')
+        return mc_sim_7b_63
 
     def medusa_generate(
         self,
@@ -227,7 +240,7 @@ class MedusaModelABC(nn.Module):
         max_steps=512,
         # The hyperparameters below are for the Medusa
         # top-1 prediciton for the next token, top-7 predictions for the next token, top-6 predictions for the next next token.
-        medusa_choices=mc_sim_7b_63,
+        medusa_choices=None,
         posterior_threshold=0.09,  # threshold validation of Medusa output
         # another threshold hyperparameter, recommended to be sqrt(posterior_threshold)
         posterior_alpha=0.3,
@@ -256,6 +269,9 @@ class MedusaModelABC(nn.Module):
         input_ids = input_ids.clone()
 
         # Cache medusa buffers (the fixed patterns for tree attention)
+        if medusa_choices is None:
+            medusa_choices = self.get_medusa_choice(self.base_model_name_or_path)
+
         if hasattr(self, "medusa_choices") and self.medusa_choices == medusa_choices:
             # Load the cached medusa buffer
             medusa_buffers = self.medusa_buffers
