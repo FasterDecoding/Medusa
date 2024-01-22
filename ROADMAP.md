@@ -1,11 +1,11 @@
 # Roadmap
 
 ## Functionality
-- [ ] Explore tree sparsity
-- [ ] Fine-tune Medusa heads together with LM head from scratch
-- [ ] Distill from any model without access to the original training data
 - [ ] Batched inference
 - [ ] Fine-grained KV cache management
+- [x] Explore tree sparsity
+- [x] Fine-tune Medusa heads together with LM head from scratch
+- [x] Distill from any model without access to the original training data
 
 ## Integration
 ### Local Deployment
@@ -14,9 +14,6 @@
 - [ ] [llama.cpp](https://github.com/ggerganov/llama.cpp)
 ### Serving
 - [ ] [vllm](https://github.com/vllm-project/vllm)
-- [ ] [TGI](https://github.com/huggingface/text-generation-inference)
 - [ ] [lightllm](https://github.com/ModelTC/lightllm)
-
-## Research
-- [x] Optimize the tree-based attention to reduce additional computation
-- [ ] Improve the acceptance scheme to generate more diverse sequences
+- [x] [TGI](https://github.com/huggingface/text-generation-inference)
+- [x] [TensorRT](https://github.com/NVIDIA/TensorRT-LLM)

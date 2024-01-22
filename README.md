@@ -2,13 +2,12 @@
 
 <p align="center">
 | <a href="https://sites.google.com/view/
-medusa-llm"><b>Blog</b></a> | <a href="ROADMAP.md"><b>Roadmap</b></a> |
+medusa-llm"><b>Blog</b></a> | <a href="https://arxiv.org/abs/2401.10774"><b>Report</b></a> | <a href="ROADMAP.md"><b>Roadmap</b></a> |
 </p>
 
 ---
 *News* 🔥
-- [2023/09] Medusa won the [Chai Prize Grant](https://twitter.com/tianle_cai/status/1703891335147897341)🎉 The prize will be used as a development bounty for those who help us achieve milestones in our [roadmap](https://github.com/FasterDecoding/Medusa/issues/3)!
-- [2023/09] Medusa v0.1 is released! 
+- [2024/1] Medusa technical report is now available on [arXiv](https://arxiv.org/abs/2401.10774). We've added multiple new features, including Medusa-2 recipe for full-model training, self-distillation for adding Medusa to any fine-tuned LLM, etc. The new results show a 2.2-3.6x speedup over the original model on a range of LLMs.
 
 ---
 ## Introduction
@@ -21,7 +20,7 @@ Medusa is a simple framework that democratizes the acceleration techniques for L
   </picture>
   <br>
   <div align="center" width="80%">
-  <em>Medusa on Vicuna-7b.</em>
+  <em>Medusa-1 on Vicuna-7b.</em>
   </div>
   <br>
 </div>
@@ -50,19 +49,25 @@ We aim to solve the challenges associated with speculative decoding by implement
 - Instead of introducing a new model, we train multiple decoding heads on the *same* model.
 - The training is parameter-efficient so that even the "GPU-Poor" can do it. And since there is no additional model, there is no need to adjust the distributed computing setup.
 - Relaxing the requirement of matching the distribution of the original model makes the non-greedy generation even faster than greedy decoding.
+
+In the initial release, our primary focus is on optimizing Medusa for a batch size of 1—a setting commonly utilized for local model hosting. In this configuration, Medusa delivers approximately a 2x speed increase across a range of Vicuna models. We are actively working to extend Medusa's capabilities by integrating it into additional inference frameworks, with the aim of achieving even greater performance gains and extending Medusa to broader settings.
+
 <p align="center">
   <picture>
-  <img src="assets/size_speedup.png" width="45%">
+  <img src="assets/medusa_speedup_cmp.jpg" width="45%">
   </picture>
 </p>
-In this initial release, our primary focus is on optimizing Medusa for a batch size of 1—a setting commonly utilized for local model hosting. In this configuration, Medusa delivers approximately a 2x speed increase across a range of Vicuna models. We are actively working to extend Medusa's capabilities by integrating it into additional inference frameworks, with the aim of achieving even greater performance gains and extending Medusa to broader settings.
+
+In the updated version, we add support for full-model training, called Medusa-2 (compared to Medusa-1, which only trains the new heads), which requires a special recipe that adds the speculative prediction ability while keeping the original model's performance.
+
+We also add support for self-distillation, which allows us to add Medusa to any fine-tuned LLM without requiring the availability of the original training data.
 
 ## Contents
 - [Introduction](#introduction)
 - [Contents](#contents)
 - [Installation](#installation)
   - [Method 1: With pip](#method-1-with-pip)
-  - [Method 2: From source](#method-2-from-source)
+  - [Method 2: From source (recommended)](#method-2-from-source)
   - [Model Weights](#model-weights)
   - [Inference](#inference)
   - [Training](#training)
@@ -75,11 +80,11 @@ In this initial release, our primary focus is on optimizing Medusa for a batch s
 - [Acknowledgements](#acknowledgements)
 
 ## Installation
-### Method 1: With pip
+### Method 1: With pip (may not be the latest version)
 ```bash
 pip install medusa-llm
 ```
-### Method 2: From the source
+### Method 2: From the source (recommended)
 ```bash
 git clone https://github.com/FasterDecoding/Medusa.git
 cd Medusa
@@ -87,11 +92,21 @@ pip install -e .
 ```
 
 ### Model Weights
+#### Medusa-1
 | Size | Chat Command                                  | Hugging Face Repo                                                     |
 | ---- | --------------------------------------------- | --------------------------------------------------------------------- |
 | 7B   | `python -m medusa.inference.cli --model FasterDecoding/medusa-vicuna-7b-v1.3` | [FasterDecoding/medusa-vicuna-7b-v1.3](https://huggingface.co/FasterDecoding/medusa-vicuna-7b-v1.3)   |
 | 13B  | `python -m medusa.inference.cli --model FasterDecoding/medusa-vicuna-13b-v1.3` | [FasterDecoding/medusa-vicuna-13b-v1.3](https://huggingface.co/FasterDecoding/medusa-vicuna-13b-v1.3) |
 | 33B  | `python -m medusa.inference.cli --model FasterDecoding/medusa-vicuna-33b-v1.3` | [FasterDecoding/medusa-vicuna-33b-v1.3](https://huggingface.co/FasterDecoding/medusa-vicuna-33b-v1.3) |
+
+#### Medusa-2
+| Size | Chat Command                                  | Hugging Face Repo                                                     |
+| ---- | --------------------------------------------- | --------------------------------------------------------------------- |
+| Zephyr-7B-Beta   | `python -m medusa.inference.cli --model FasterDecoding/medusa-1.0-zephyr-7b-beta` | [FasterDecoding/medusa-1.0-zephyr-7b-beta](https://huggingface.co/FasterDecoding/medusa-1.0-zephyr-7b-beta)   |
+| Vicuna-7B-v1.5 | `python -m medusa.inference.cli --model FasterDecoding/medusa-1.0-vicuna-7b-v1.5` | [FasterDecoding/medusa-1.0-vicuna-7b-v1.5](https://huggingface.co/FasterDecoding/medusa-1.0-vicuna-7b-v1.5) |
+| Vicuna-13B-v1.5  | `python -m medusa.inference.cli --model FasterDecoding/medusa-1.0-vicuna-13b-v1.5` | [FasterDecoding/medusa-1.0-vicuna-13b-v1.5](https://huggingface.co/FasterDecoding/medusa-1.0-vicuna-13b-v1.5) |
+| Vicuna-33B-v1.5  | `python -m medusa.inference.cli --model FasterDecoding/medusa-1.0-vicuna-33b-v1.5` | [FasterDecoding/medusa-1.0-vicuna-33b-v1.5](https://huggingface.co/FasterDecoding/medusa-1.0-vicuna-33b-v1.5) |
+
 
 ### Inference
 We currently support single-GPU inference with a batch size of 1, which is the most common setup for local model hosting. We are actively working to extend Medusa's capabilities by integrating it into other inference frameworks; please don't hesitate to reach out if you are interested in contributing to this effort.
@@ -103,6 +118,11 @@ CUDA_VISIBLE_DEVICES=0 python -m medusa.inference.cli --model [path of medusa mo
 You can also pass `--load-in-8bit` or `--load-in-4bit` to load the base model in quantized format. If you download the base model elsewhere, you may override base model name or path with `--base-model  [path of base model]`.
 
 ### Training
+In the updated version, we use the amazing [axolotl](https://github.com/OpenAccess-AI-Collective/axolotl) library to manage the training process. Please refer to our [fork](https://github.com/ctlllll/axolotl) for the training code. The major code modifications are in [`src/axolotl/utils/models.py`](https://github.com/ctlllll/axolotl/blob/main/src/axolotl/utils/models.py). The training configs can be found in [`examples/medusa`](https://github.com/ctlllll/axolotl/tree/main/examples/medusa).
+
+The data preparation code for self-distillation can be found in [`data_generation` folder](data_generation) of the current repo.
+
+### Training (legacy)
 For training, please install:
 ```bash
 pip install -e ".[train]"
@@ -148,13 +168,11 @@ python -m medusa.hf_utils --folder [path of the model folder] --repo [name of th
 
 ## Citation
 ```bibtex
-@misc{medusa,
-  author = {Tianle Cai and Yuhong Li and Zhengyang Geng and Hongwu Peng and Tri Dao},
-  title = {Medusa: Simple Framework for Accelerating LLM Generation with Multiple Decoding Heads},
-  year = {2023},
-  publisher = {GitHub},
-  journal = {GitHub repository},
-  howpublished = {\url{https://github.com/FasterDecoding/Medusa}},
+@article{cai2024medusa,
+  title   = {Medusa: Simple LLM Inference Acceleration Framework with Multiple Decoding Heads},
+  author  = {Tianle Cai and Yuhong Li and Zhengyang Geng and Hongwu Peng and Jason D. Lee and Deming Chen and Tri Dao},
+  year    = {2024},
+  journal = {arXiv preprint arXiv: 2401.10774}
 }
 ```
 
@@ -163,8 +181,16 @@ python -m medusa.hf_utils --folder [path of the model folder] --repo [name of th
 
 We also provide some illustrative notebooks in `notebooks/` to help you understand the codebase.
 
+## Community Adoption
+We are super excited to see that Medusa has been adopted by many open-source projects. Here is an (incomplete) list:
+- [TensorRT-LLM](https://github.com/NVIDIA/TensorRT-LLM/tree/main/examples/medusa)
+- [TGI](https://github.com/huggingface/text-generation-inference/blob/main/server/text_generation_server/utils/medusa.py)
+We are grateful to the authors for their contributions to the community and sincerely hope that Medusa can help accelerate the development of LLMs. If you are using Medusa in your project, please let us know, and we will add your project to the list.
+
 ## Contributing
 We welcome community contributions to Medusa. If you have an idea for how to improve it, please open an issue to discuss it with us. When submitting a pull request, please ensure that your changes are well-tested. Please split each major change into a separate pull request. We also have a [Roadmap](ROADMAP.md) summarizing our future plans for Medusa. Don't hesitate to reach out if you are interested in contributing to any of the items on the roadmap.
 
 ## Acknowledgements
-This codebase is influenced by remarkable projects from the LLM community, including [FastChat](https://github.com/lm-sys/FastChat), [TinyChat](https://github.com/mit-han-lab/llm-awq/tree/main/), [vllm](https://github.com/vllm-project/vllm) and many others.
+This codebase is influenced by remarkable projects from the LLM community, including [FastChat](https://github.com/lm-sys/FastChat), [TinyChat](https://github.com/mit-han-lab/llm-awq/tree/main/), [vllm](https://github.com/vllm-project/vllm), [axolotl](https://github.com/OpenAccess-AI-Collective/axolotl).
+
+This project is supported by [Together AI](https://together.ai/), [MyShell AI](https://myshell.ai/), [Chai AI](https://www.chai-research.com/).
