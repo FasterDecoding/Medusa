@@ -1,27 +1,22 @@
-# This CITATION.cff file was generated with cffinit.
-# Visit https://bit.ly/cffinit to generate yours today!
-
 cff-version: 1.2.0
-title: 'Medusa'
-message: >-
-  If you use this software, please cite it using the
-  metadata from this file.
-type: software
-authors:
-  - given-names: Tianle
-    family-names: Cai
-  - given-names: Yuhong
-    family-names: Li
-  - given-names: Zhengyang
-    family-names: Geng
-  - given-names: Hongwu
-    family-names: Peng
-  - given-names: Tri
-    family-names: Dao
-repository-code: 'https://github.com/FasterDecoding/Medusa'
-url: 'https://sites.google.com/view/medusa-llm'
-abstract: >-
-  Medusa: Simple Framework for Accelerating LLM Generation
-  with Multiple Decoding Heads
-license: Apache-2.0
-date-released: '2023-09-10'
+message: "If you use this software, please cite it as below."
+references:
+  - type: article
+    authors:
+      - family-names: Cai
+        given-names: Tianle
+      - family-names: Li
+        given-names: Yuhong
+      - family-names: Geng
+        given-names: Zhengyang
+      - family-names: Peng
+        given-names: Hongwu
+      - family-names: Lee
+        given-names: Jason D.
+      - family-names: Chen
+        given-names: Deming
+      - family-names: Dao
+        given-names: Tri
+    title: "Medusa: Simple LLM Inference Acceleration Framework with Multiple Decoding Heads"
+    year: 2024
+    journal: "arXiv preprint arXiv: 2401.10774"

@@ -76,6 +76,7 @@ We also add support for self-distillation, which allows us to add Medusa to any 
     - [Push to Hugging Face Hub](#push-to-hugging-face-hub)
 - [Citation](#citation)
 - [Codebase Guide](#codebase-guide)
+- [Community Adoption](#community-adoption)
 - [Contributing](#contributing)
 - [Acknowledgements](#acknowledgements)
 
