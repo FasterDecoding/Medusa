@@ -36,8 +36,6 @@ def main(args):
     try:
         model = MedusaModel.from_pretrained(
             args.model,
-            args.base_model,
-            medusa_num_heads = 4,
             torch_dtype=torch.float16,
             low_cpu_mem_usage=True,
             device_map="auto",
@@ -48,7 +46,7 @@ def main(args):
         conv = None
 
         def new_chat():
-            return get_conversation_template("vicuna")
+            return get_conversation_template(args.model)
 
         def reload_conv(conv):
             """
@@ -187,7 +185,6 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=str, required=True, help="Model name or path.")
-    parser.add_argument("--base-model", type=str, default=None, help="Base model name or path.")
     parser.add_argument(
         "--load-in-8bit", action="store_true", help="Use 8-bit quantization"
     )
