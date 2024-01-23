@@ -186,6 +186,8 @@ We also provide some illustrative notebooks in `notebooks/` to help you understa
 We are super excited to see that Medusa has been adopted by many open-source projects. Here is an (incomplete) list:
 - [TensorRT-LLM](https://github.com/NVIDIA/TensorRT-LLM/tree/main/examples/medusa)
 - [TGI](https://github.com/huggingface/text-generation-inference/blob/main/server/text_generation_server/utils/medusa.py)
+- [RTP-LLM](https://github.com/alibaba/rtp-llm/blob/main/docs/SpeculativeDecoding-Tutroial.md#medusa-decoding)
+
 We are grateful to the authors for their contributions to the community and sincerely hope that Medusa can help accelerate the development of LLMs. If you are using Medusa in your project, please let us know, and we will add your project to the list.
 
 ## Contributing
