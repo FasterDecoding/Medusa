@@ -66,14 +66,13 @@ We also add support for self-distillation, which allows us to add Medusa to any 
 - [Introduction](#introduction)
 - [Contents](#contents)
 - [Installation](#installation)
-  - [Method 1: With pip](#method-1-with-pip)
-  - [Method 2: From source (recommended)](#method-2-from-source)
+  - [Method 1: With pip (may not be the latest version)](#method-1-with-pip-may-not-be-the-latest-version)
+  - [Method 2: From the source (recommended)](#method-2-from-the-source-recommended)
   - [Model Weights](#model-weights)
   - [Inference](#inference)
   - [Training](#training)
-    - [Prepare the data](#prepare-the-data)
-    - [Train the model](#train-the-model)
-    - [Push to Hugging Face Hub](#push-to-hugging-face-hub)
+  - [Training (legacy)](#training-legacy)
+  - [Push to Hugging Face Hub](#push-to-hugging-face-hub)
 - [Citation](#citation)
 - [Codebase Guide](#codebase-guide)
 - [Community Adoption](#community-adoption)
@@ -119,11 +118,16 @@ CUDA_VISIBLE_DEVICES=0 python -m medusa.inference.cli --model [path of medusa mo
 You can also pass `--load-in-8bit` or `--load-in-4bit` to load the base model in quantized format. If you download the base model elsewhere, you may override base model name or path with `--base-model  [path of base model]`.
 
 ### Training
-In the updated version, we use the amazing [axolotl](https://github.com/OpenAccess-AI-Collective/axolotl) library to manage the training process. Please refer to our [fork](https://github.com/ctlllll/axolotl) for the training code. The major code modifications are in [`src/axolotl/utils/models.py`](https://github.com/ctlllll/axolotl/blob/main/src/axolotl/utils/models.py). The training configs can be found in [`examples/medusa`](https://github.com/ctlllll/axolotl/tree/main/examples/medusa).
+In the updated version, we use the amazing [axolotl](https://github.com/OpenAccess-AI-Collective/axolotl) library to manage the training process. Please refer to our [fork](https://github.com/ctlllll/axolotl) for the training code. The major code modifications are in [`src/axolotl/utils/models.py`](https://github.com/ctlllll/axolotl/blob/main/src/axolotl/utils/models.py). The training configs can be found in [`examples/medusa`](https://github.com/ctlllll/axolotl/tree/main/examples/medusa). A typical training command is as follows:
+```bash
+accelerate launch -m axolotl.cli.train examples/medusa/your_config.yml
+```
 
-The data preparation code for self-distillation can be found in [`data_generation` folder](data_generation) of the current repo.
+The data preparation code for self-distillation can be found in [`data_generation` folder](data_generation) of the current repo. For other datasets, you can directly download the data from the corresponding Hugging Face dataset repo.
 
 ### Training (legacy)
+*The following instructions are for the initial release of Medusa, it provides a minimal example of how to train a Medusa-1 model. For the updated version, please refer to the previous section.*
+
 For training, please install:
 ```bash
 pip install -e ".[train]"
@@ -161,7 +165,7 @@ torchrun --nproc_per_node=4 medusa/train/train.py --model_name_or_path lmsys/vic
     --medusa_num_heads 3 \
     --medusa_num_layers 1
 ```
-#### Push to Hugging Face Hub
+### Push to Hugging Face Hub
 You can use the following command to push your model to the Hugging Face Hub:
 ```bash
 python -m medusa.hf_utils --folder [path of the model folder] --repo [name of the repo]
