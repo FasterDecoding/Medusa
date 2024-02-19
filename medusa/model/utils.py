@@ -1,7 +1,29 @@
 import torch
 import torch.nn.functional as F
+import pdb
 
 TOPK=10 # topk for sparse tree (10 is a placeholder and it is sufficient)
+
+def extract_last_valid_logits(logits: torch.Tensor, valid_length: torch.Tensor):
+    """
+    Extract logits of the last valid token for each sequence in the batch.
+
+    Args:
+        logits (torch.Tensor): Logits tensor of shape [batch_size, sequence_length, vocab_size], on GPU.
+        valid_length (torch.Tensor): valid_length tensor of shape [batch_size], on GPU.
+
+    Returns:
+        torch.Tensor: Tensor containing the logits of the last valid token for each sequence, on GPU.
+    """
+    if logits.dim() == 3:
+        batch_indices = torch.arange(logits.size(0), device=logits.device)  # Batch indices
+        # Extract the logits of the last valid token for each sequence
+        last_valid_logits = logits[batch_indices, valid_length - 1]
+    elif logits.dim() == 4:
+        batch_indices = torch.arange(logits.size(1), device=logits.device)  # Batch indices
+        # Extract the logits of the last valid token for each sequence
+        last_valid_logits = logits[:, batch_indices, valid_length - 1].transpose(1,0)        
+    return last_valid_logits
 
 def pad_path(path, length, pad_value=-2):
     """
@@ -106,7 +128,6 @@ def generate_medusa_buffers(medusa_choices, device="cuda"):
     retrieve_indices = torch.tensor(retrieve_indices, dtype=torch.long)
     retrieve_indices = retrieve_indices + 1
     retrieve_indices = torch.cat([torch.zeros((retrieve_indices.shape[0], 1), dtype=torch.long), retrieve_indices], dim=1)
-
     # Aggregate the generated buffers into a dictionary
     medusa_buffers = {
         "medusa_attn_mask": medusa_attn_mask.unsqueeze(0).unsqueeze(0),
@@ -125,7 +146,7 @@ def generate_medusa_buffers(medusa_choices, device="cuda"):
     return medusa_buffers
 
 
-def initialize_medusa(input_ids, model, medusa_attn_mask, past_key_values):
+def initialize_medusa(input_ids, model, medusa_attn_mask, past_key_values, attention_mask=None):
     """
     Initializes the Medusa structure for a given model.
 
@@ -144,7 +165,7 @@ def initialize_medusa(input_ids, model, medusa_attn_mask, past_key_values):
     - logits (torch.Tensor): Original logits from the base model.
     """
     medusa_logits, outputs, logits = model(
-        input_ids, past_key_values=past_key_values, output_orig=True, medusa_forward=True
+        input_ids, attention_mask=attention_mask, past_key_values=past_key_values, output_orig=True, medusa_forward=True
     )
     model.base_model.model.medusa_mask = medusa_attn_mask
     return medusa_logits, logits
@@ -172,7 +193,6 @@ def reset_medusa_mode(
     """
     model.base_model.model.medusa_mask = None
     model.base_model.model.medusa_mode = None
-
 
 def reset_past_key_values(passed_key_values):
     """
@@ -255,7 +275,7 @@ def get_typical_one_token(logit, temperature, posterior_threshold, posterior_alp
     sampled_tokens = torch.multinomial(F.softmax(logit, dim=-1), 1)
     return sampled_tokens
 
-def generate_candidates(medusa_logits, logits, tree_indices, retrieve_indices, temperature = 0, posterior_threshold=0.3, posterior_alpha = 0.09, top_p=0.8, sampling = 'typical', fast = False):
+def generate_candidates(medusa_logits, logits, tree_indices, retrieve_indices, temperature = 0, posterior_threshold=0.3, posterior_alpha = 0.09, top_p=0.8, sampling = 'typical', fast = False, valid_length=None):
     """
     Generate candidates based on provided logits and indices.
     
@@ -276,34 +296,59 @@ def generate_candidates(medusa_logits, logits, tree_indices, retrieve_indices, t
         1. Cartesian candidates derived from the combined original and Medusa logits.
         2. Tree candidates mapped from the Cartesian candidates using tree indices.
     """
+
+    if valid_length is not None:
+        last_logits = extract_last_valid_logits(logits, valid_length)
+        medusa_last_logits = extract_last_valid_logits(medusa_logits, valid_length)
+    else:
+        last_logits = logits
+        medusa_last_logits = medusa_logits
     # Greedy decoding: Select the most probable candidate from the original logits.
     if temperature == 0 or fast:
-        candidates_logit = torch.argmax(logits[:, -1]).unsqueeze(0)
+        candidates_logit = torch.argmax(last_logits, dim=-1).unsqueeze(-1) ##logits: [bs,seq,vocab], candidates_logit:[bs,1]
     else:
         if sampling == 'typical':
-            candidates_logit = get_typical_one_token(logits[:, -1], temperature, posterior_threshold, posterior_alpha).squeeze(0)
+            candidates_logit = get_typical_one_token(last_logits, temperature, posterior_threshold, posterior_alpha).squeeze(0)
         elif sampling == 'nucleus':
-            candidates_logit = get_nucleus_one_token(logits[:, -1], temperature, top_p).squeeze(0)
+            candidates_logit = get_nucleus_one_token(last_logits, temperature, top_p).squeeze(0)
         else:
             raise NotImplementedError
+    
     # Extract the TOPK candidates from the medusa logits.
-    candidates_medusa_logits = torch.topk(medusa_logits[:, 0, -1], TOPK, dim = -1).indices
-
+    candidates_medusa_logits = torch.topk(medusa_last_logits, TOPK, dim = -1).indices ##candidates_medusa_logits：[bs, medusa_head_num, TOPK]
+    batch_size = candidates_logit.shape[0]
     # Combine the selected candidate from the original logits with the topk medusa logits.
-    candidates = torch.cat([candidates_logit, candidates_medusa_logits.view(-1)], dim=-1)
+    candidates = torch.cat([candidates_logit, candidates_medusa_logits.view(batch_size, -1)], dim=-1)
 
     # Map the combined candidates to the tree indices to get tree candidates.
-    tree_candidates = candidates[tree_indices]
+    tree_candidates = candidates[:,tree_indices]
 
     # Extend the tree candidates by appending a zero.
-    tree_candidates_ext = torch.cat([tree_candidates, torch.zeros((1), dtype=torch.long, device=tree_candidates.device)], dim=0)
+    tree_candidates_ext = torch.cat([tree_candidates, torch.zeros((batch_size,1), dtype=torch.long, device=tree_candidates.device)], dim=-1)
 
     # Retrieve the cartesian candidates using the retrieve indices.
-    cart_candidates = tree_candidates_ext[retrieve_indices]
+    cart_candidates = tree_candidates_ext[:,retrieve_indices]
 
     # Unsqueeze the tree candidates for dimension consistency.
-    tree_candidates = tree_candidates.unsqueeze(0)
+    # tree_candidates = tree_candidates.unsqueeze(0)
     return cart_candidates, tree_candidates
+
+def update_position_id(medusa_position_ids, attention_mask, input_ids):
+    bs = input_ids.shape[0]
+    seqlen = medusa_position_ids.shape[0]
+    medusa_position_ids_unsqueezed = torch.unsqueeze(medusa_position_ids, dim=0)
+    medusa_position_ids_repeated = medusa_position_ids_unsqueezed.repeat(bs,1)
+    valid_length = torch.unsqueeze(attention_mask.sum(dim=1), dim=-1)
+    valid_length_repeated = valid_length.repeat(1, seqlen)
+    position_ids = medusa_position_ids_repeated + valid_length_repeated
+    return position_ids
+
+def update_attention_mask(attention_mask, tree_candidates):
+    bs = tree_candidates.shape[0]
+    n = tree_candidates.shape[1]
+    new_tokens = torch.ones((bs, n), dtype=attention_mask.dtype, device=attention_mask.device)
+    extended_attention_mask = torch.cat((attention_mask, new_tokens), dim=1)
+    return extended_attention_mask
 
 
 def tree_decoding(
@@ -313,6 +358,7 @@ def tree_decoding(
     medusa_position_ids,
     input_ids,
     retrieve_indices,
+    attention_mask
 ):
     """
     Decode the tree candidates using the provided model and reorganize the logits.
@@ -328,23 +374,23 @@ def tree_decoding(
     Returns:
     - tuple: Returns medusa logits, regular logits, and other outputs from the model.
     """
-
     # Compute new position IDs by adding the Medusa position IDs to the length of the input sequence.
-    position_ids = medusa_position_ids + input_ids.shape[1]
-
+    # position_ids = medusa_position_ids + input_ids.shape[1]
+    position_ids = update_position_id(medusa_position_ids, attention_mask, input_ids)
+    attention_mask = update_attention_mask(attention_mask, tree_candidates)
     # Use the model to decode the tree candidates. 
     # The model is expected to return logits for the Medusa structure, original logits, and possibly other outputs.
     tree_medusa_logits, outputs, tree_logits = model(
         tree_candidates,
+        attention_mask=attention_mask,
         output_orig=True,
         past_key_values=past_key_values,
         position_ids=position_ids,
         medusa_forward=True,
     )
-    
     # Reorder the obtained logits based on the retrieve_indices to ensure consistency with some reference ordering.
-    logits = tree_logits[0, retrieve_indices]
-    medusa_logits = tree_medusa_logits[:, 0, retrieve_indices]
+    logits = tree_logits[:, retrieve_indices]
+    medusa_logits = tree_medusa_logits[:, :, retrieve_indices]
     return medusa_logits, logits, outputs
 
 def get_nucleus_posterior_mask(logits, candidates, temperature, top_p):
@@ -430,9 +476,7 @@ def get_typical_posterior_mask(logits, candidates, temperature, posterior_thresh
     sampled_tokens = sampled_tokens.view(n_samples, n_tokens)
     posterior_mask = (candidates[:, 1:] == sampled_tokens).int()
     return posterior_mask
-    
-    
-
+     
 def evaluate_posterior(
     logits, candidates, temperature, posterior_threshold=0.3, posterior_alpha = 0.09, top_p=0.8, sampling = 'typical', fast = True
 ):
@@ -473,9 +517,9 @@ def evaluate_posterior(
         
     if sampling == 'typical':
         if fast:
-            posterior_prob = torch.softmax(logits[:, :-1] / temperature, dim=-1)
+            posterior_prob = torch.softmax(logits[:,:,:-1] / temperature, dim=-1)
             candidates_prob = torch.gather(
-                posterior_prob, dim=-1, index=candidates[:, 1:].unsqueeze(-1)
+                posterior_prob, dim=-1, index=candidates[:,:,1:].unsqueeze(-1)
             ).squeeze(-1)
             posterior_entropy = -torch.sum(
                 posterior_prob * torch.log(posterior_prob + 1e-5), dim=-1
@@ -485,21 +529,20 @@ def evaluate_posterior(
                 torch.exp(-posterior_entropy) * posterior_alpha,
             )
             posterior_mask = candidates_prob > threshold
-            candidates_accept_length = (torch.cumprod(posterior_mask, dim=1)).sum(dim=1)
-
+            candidates_accept_length = (torch.cumprod(posterior_mask, dim=-1)).sum(dim=-1)
+            batch_size, num_path = candidates_accept_length.shape
+            best_candidate = torch.zeros(batch_size, dtype=torch.long, device=candidates_accept_length.device)
             # Choose the best candidate based on the evaluated posterior probabilities
-            accept_length = candidates_accept_length.max()
-            if accept_length == 0:
-                # If no candidates are accepted, just choose the first one
-                best_candidate = torch.tensor(0, dtype=torch.long, device=candidates.device)
-            else:
-                best_candidates = torch.where(candidates_accept_length == accept_length)[0]
-                # Accept the best one according to likelihood
-                likelihood = torch.sum(
-                    torch.log(candidates_prob[best_candidates, :accept_length]), dim=-1
-                )
-                best_candidate = best_candidates[torch.argmax(likelihood)]
-            return best_candidate, accept_length
+            accept_lengths = candidates_accept_length.max(dim=1)[0]
+            for i in range(batch_size):
+                if accept_lengths[i] != 0:
+                    best_candidates = torch.where(candidates_accept_length[i] == accept_lengths[i])[0]
+                    # Accept the best one according to likelihood
+                    likelihood = torch.sum(
+                        torch.log(candidates_prob[i, best_candidates, :accept_lengths[i]]), dim=-1
+                    )
+                    best_candidate[i] = best_candidates[torch.argmax(likelihood)]
+            return best_candidate, accept_lengths
         # Calculate posterior probabilities and thresholds for candidate selection
         posterior_mask = get_typical_posterior_mask(logits, candidates, temperature, posterior_threshold, posterior_alpha, fast)
         candidates_accept_length = (torch.cumprod(posterior_mask, dim=1)).sum(dim=1)
@@ -528,6 +571,101 @@ def evaluate_posterior(
         return best_candidate, accept_length
     else:
         raise NotImplementedError
+
+
+def generate_gather_mask(accept_length, max_accept_length):
+    batch_size = accept_length.shape[0]
+    range_tensor = torch.arange(max_accept_length, device='cuda:0').expand(batch_size, -1)
+    gather_mask = (range_tensor < accept_length.unsqueeze(1))
+    return gather_mask
+
+
+def generate_gather_indices(gather_mask, max_accept_length, candidate_ids, prev_input_len):
+    batch_size, _ = candidate_ids.shape
+    output_indices = torch.full((batch_size, max_accept_length), -1, dtype=torch.long, device=candidate_ids.device)
+    candidate_ids_ = candidate_ids[:, :max_accept_length] + prev_input_len
+    output = torch.where(gather_mask, candidate_ids_, output_indices)
+    return output
+
+
+def select_new_tokens(candidates, best_candidate, gather_mask, max_accept_length, padding_id):
+    batch_size, _, _ = candidates.shape
+    candidates = candidates[:, :, :max_accept_length]
+    best_paths = torch.gather(candidates, 1, best_candidate.unsqueeze(-1).unsqueeze(-1).expand(-1, -1, candidates.size(2))).squeeze(1)
+    default_ids = torch.full((batch_size, max_accept_length), padding_id, dtype=best_paths.dtype, device=best_paths.device)
+    output = torch.where(gather_mask, best_paths, default_ids)
+    return output
+
+
+def gather_from_past_key_values(past_key_values_data, select_indices):
+    layers, batch_size, head_num, _, hidden_size = past_key_values_data.shape
+    seqlen = select_indices.shape[1]
+
+    result_data = torch.zeros(layers, batch_size, head_num, seqlen, hidden_size, device=past_key_values_data.device, dtype=past_key_values_data.dtype)
+
+    expanded_indices = select_indices.unsqueeze(0).unsqueeze(2).expand(layers, batch_size, head_num, seqlen)
+
+    valid_indices_mask = expanded_indices != -1
+
+    corrected_indices = torch.where(valid_indices_mask, expanded_indices, torch.zeros_like(expanded_indices))
+
+    gathered_data = torch.gather(past_key_values_data, 3, corrected_indices.unsqueeze(-1).expand(-1, -1, -1, -1, hidden_size))
+
+    result_data = torch.where(valid_indices_mask.unsqueeze(-1), gathered_data, result_data)
+    return result_data
+
+## pad every step
+def update_ids_new(input_ids, new_ids):
+    input_ids = torch.cat([input_ids, new_ids], dim=-1)
+    return input_ids
+
+def update_mask(attention_mask, accept_length):
+    range_tensor = torch.arange(accept_length.max().item(), device='cuda:0').expand(accept_length.shape[0], -1)
+    new_attention_mask = (range_tensor < accept_length.unsqueeze(1)).to(int)
+    attention_mask = torch.cat((attention_mask, new_attention_mask), dim=-1)
+    return attention_mask
+
+def update_kvcache(tgt, past_key_values_data, prev_input_len):
+    dst = past_key_values_data[..., prev_input_len : prev_input_len + tgt.shape[-2], :]
+    dst.copy_(tgt, non_blocking=True)
+
+## avoid too much [PAD]
+def update_ids_new(previous_ids, new_ids, padding_value=0):
+    batch_size = previous_ids.shape[0]
+    previous_seqlen = previous_ids.shape[1]
+    new_seqlen = new_ids.shape[1]
+    new_id_index = torch.arange(new_seqlen, device='cuda:0').expand(batch_size, -1)
+    
+    previous_mask = previous_ids != padding_value
+    new_id_mask = new_ids != padding_value
+   
+    previous_valid_lengths = previous_mask.sum(dim=1)
+    new_id_valid_lengths = new_id_mask.sum(dim=1)
+    broad_max_output_len = previous_valid_lengths.max() + new_id_valid_lengths.max()
+    tight_max_output_len = (previous_valid_lengths + new_id_valid_lengths).max()
+
+    new_id_index = previous_valid_lengths.view(batch_size,-1) + new_id_index
+    output = torch.full((batch_size, broad_max_output_len), padding_value, dtype=previous_ids.dtype, device=previous_ids.device)
+    output[:, :previous_seqlen] = previous_ids
+    output = output.scatter(1,new_id_index, new_ids)
+    if tight_max_output_len < broad_max_output_len:
+        output = output[:,:tight_max_output_len]
+    return output, new_id_index
+
+def update_mask_new(attention_mask, accept_length):
+    batch_size = attention_mask.shape[0]
+    previous_valid_lengths = attention_mask.sum(dim=1)
+    new_valid_lengths = (previous_valid_lengths + accept_length).view(batch_size, -1)
+    max_new_valid_length = new_valid_lengths.max()
+    output = torch.arange(max_new_valid_length, dtype=attention_mask.dtype, device=attention_mask.device).expand(batch_size, -1)
+    output = (output < new_valid_lengths).to(int)
+    return output, max_new_valid_length
+
+def update_kvcache_new(tgt, past_key_values_data, scatter_index):
+    n_layers, _, num_head, _, hidden_size = tgt.shape
+    expand_scatter_index = scatter_index.unsqueeze(0).unsqueeze(2).unsqueeze(4).expand(n_layers,-1,num_head,-1,hidden_size)
+    past_key_values_data.scatter_(3, expand_scatter_index, tgt)
+
 def update_inference_inputs(
     input_ids,
     candidates,
@@ -540,6 +678,8 @@ def update_inference_inputs(
     new_token,
     past_key_values_data,
     current_length_data,
+    attention_mask,
+    padding_idx=0
 ):
     """
     Update the input sequences and relevant tensors based on the selected best candidate from the inference results.
@@ -552,7 +692,7 @@ def update_inference_inputs(
     - retrieve_indices (torch.Tensor): Indices to map tree to a cartesian product.
     - outputs, logits, medusa_logits (torch.Tensor): Model's outputs from the previous inference step.
     - new_token (int): Counter for the new tokens added during inference.
-    - past_key_values_data (torch.Tensor): Tensor containing past hidden states for the transformer model.
+    - past_key_values_data (torch.Tensor): Tensor containing past hidden states for the transformer model. [layers, batch_size, head_num, max_seqlen, hidden_size]
     - current_length_data (torch.Tensor): Tensor containing the current length of sequences in the batch.
 
     Returns:
@@ -561,33 +701,37 @@ def update_inference_inputs(
     - medusa_logits (torch.Tensor): Updated medusa logits.
     - new_token (int): Updated counter for the new tokens added.
     """
+    accept_length += 1 ## accept_length > 0
+    max_accept_length = accept_length.max().item()
     # Calculate the starting position for new tokens based on the previous input length
     prev_input_len = input_ids.shape[1]
     # Map the best candidate indices to the original indices in the sequence
-    select_indices = (
-        retrieve_indices[best_candidate, : accept_length + 1] + prev_input_len
-    )
+    candidate_ids = retrieve_indices[best_candidate]
+    gather_mask = generate_gather_mask(accept_length, max_accept_length)
+    select_indices = generate_gather_indices(gather_mask, max_accept_length, candidate_ids, prev_input_len)
+    new_ids = select_new_tokens(candidates, best_candidate, gather_mask, max_accept_length, padding_id=padding_idx)
     # Append the tokens from the best candidate to the input sequence
-    input_ids = torch.cat(
-        [input_ids, candidates[None, best_candidate, : accept_length + 1]], dim=-1
-    )
+    input_ids = update_ids_new(input_ids, new_ids)
     # Update the past key values based on the selected tokens
     # Source tensor that contains relevant past information based on the selected candidate
-    tgt = past_key_values_data[..., select_indices, :]
+    tgt = gather_from_past_key_values(past_key_values_data, select_indices)
     # Destination tensor where the relevant past information will be stored
-    dst = past_key_values_data[..., prev_input_len : prev_input_len + tgt.shape[-2], :]
     # Copy relevant past information from the source to the destination
-    dst.copy_(tgt, non_blocking=True)
-
+    update_kvcache(tgt, past_key_values_data, prev_input_len)
     # Update the current length tensor (currently only support batch size is 1)
-    current_length_data.fill_(prev_input_len + tgt.shape[-2])
-
-    # Extract logits and medusa logits for the accepted tokens
-    logits = logits[None, best_candidate, accept_length : accept_length + 1]
-    medusa_logits = medusa_logits[
-        :, None, best_candidate, accept_length : accept_length + 1
-    ]
+    current_length_data.fill_(prev_input_len + tgt.shape[-2])    
+    batch_indices = torch.arange(best_candidate.size(0), device=logits.device)
+    if True:
+        # Extract logits and medusa logits for the accepted tokens
+        logits = logits[batch_indices, best_candidate, : max_accept_length]
+        medusa_logits = medusa_logits[:, batch_indices, best_candidate, : max_accept_length]
+        valid_length = accept_length
+    else:
+        # Extract logits and medusa logits for the last accepted tokens
+        logits = logits[batch_indices, best_candidate, accept_length-1]
+        medusa_logits = medusa_logits[:, batch_indices, best_candidate, accept_length-1]
+        valid_length = None
     # Update the new token counter
-    new_token += accept_length + 1
-
-    return input_ids, logits, medusa_logits, new_token
+    new_token += max_accept_length
+    attention_mask = update_mask(attention_mask, accept_length)
+    return input_ids, logits, medusa_logits, new_token, valid_length, attention_mask

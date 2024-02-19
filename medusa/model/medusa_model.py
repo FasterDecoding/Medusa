@@ -3,7 +3,7 @@ import torch.nn as nn
 from .modeling_llama_kv import LlamaForCausalLM as KVLlamaForCausalLM
 from .modeling_mistral_kv import MistralForCausalLM as KVMistralForCausalLM
 # import transformers
-
+import pdb
 # # monkey patch
 # transformers.models.llama.modeling_llama.LlamaForCausalLM = KVLlamaForCausalLM
 # transformers.models.mistral.modeling_mistral.MistralForCausalLM = KVMistralForCausalLM
@@ -121,6 +121,7 @@ class MedusaModelABC(nn.Module):
     @property
     def base_model(self):
         return self
+
     @classmethod
     def from_pretrained(
         cls,
@@ -219,6 +220,7 @@ class MedusaModelABC(nn.Module):
         if output_orig:
             return torch.stack(medusa_logits, dim=0), outputs, orig
         return torch.stack(medusa_logits, dim=0)
+
     def get_medusa_choice(self, model_name):
         if 'vicuna' in model_name:
             if '7b' in model_name:
@@ -264,10 +266,11 @@ class MedusaModelABC(nn.Module):
 
         Warning: Only support batch size 1 for now!!
         """
-        assert input_ids.shape[0] == 1, "Only support batch size 1 for now!!"
+        # assert input_ids.shape[0] == 1, "Only support batch size 1 for now!!"
+        batch_size = input_ids.shape[0]
+        valid_length = attention_mask.sum(dim=1)
         # Avoid modifying the input_ids in-place
         input_ids = input_ids.clone()
-
         # Cache medusa buffers (the fixed patterns for tree attention)
         if medusa_choices is None:
             medusa_choices = self.get_medusa_choice(self.base_model_name_or_path)
@@ -295,7 +298,7 @@ class MedusaModelABC(nn.Module):
                 past_key_values,
                 past_key_values_data,
                 current_length_data,
-            ) = initialize_past_key_values(self.base_model)
+            ) = initialize_past_key_values(self.base_model, batch_size)
             self.past_key_values = past_key_values
             self.past_key_values_data = past_key_values_data
             self.current_length_data = current_length_data
@@ -305,12 +308,11 @@ class MedusaModelABC(nn.Module):
         reset_medusa_mode(self)
         # Initialize tree attention mask and process prefill tokens
         medusa_logits, logits = initialize_medusa(
-            input_ids, self, medusa_buffers["medusa_attn_mask"], past_key_values
+            input_ids, self, medusa_buffers["medusa_attn_mask"], past_key_values, attention_mask
         )
-
         new_token = 0
         last_round_token = 0
-
+        ends = [input_len] * batch_size
         for idx in range(max_steps):
             # Generate candidates with topk predictions from Medusa heads
             candidates, tree_candidates = generate_candidates(
@@ -324,8 +326,8 @@ class MedusaModelABC(nn.Module):
                 top_p=top_p,
                 sampling=sampling,
                 fast=fast,
+                valid_length=valid_length
             )
-
             # Use tree attention to verify the candidates and get predictions
             medusa_logits, logits, outputs = tree_decoding(
                 self,
@@ -334,15 +336,14 @@ class MedusaModelABC(nn.Module):
                 medusa_buffers["medusa_position_ids"],
                 input_ids,
                 medusa_buffers["retrieve_indices"],
+                attention_mask=attention_mask
             )
-
             # Evaluate the posterior of the candidates to select the accepted candidate prefix
             best_candidate, accept_length = evaluate_posterior(
                 logits, candidates, temperature, posterior_threshold, posterior_alpha, top_p=top_p, sampling=sampling, fast=fast
             )
-
             # Update the input_ids and logits
-            input_ids, logits, medusa_logits, new_token = update_inference_inputs(
+            input_ids, logits, medusa_logits, new_token, valid_length, attention_mask = update_inference_inputs(
                 input_ids,
                 candidates,
                 best_candidate,
@@ -354,18 +355,29 @@ class MedusaModelABC(nn.Module):
                 new_token,
                 past_key_values_data,
                 current_length_data,
+                attention_mask=attention_mask,
+                padding_idx=self.tokenizer.pad_token_id
             )
 
-            yield {
-                "text": self.tokenizer.decode(
-                    input_ids[0, input_len:],
+            decoded_texts = []
+            eos_encountered = [False] * batch_size
+            for i in range(batch_size):
+                # 检查当前批次的文本是否包含结束符
+                if self.tokenizer.eos_token_id in input_ids[i, input_len:]:
+                    eos_encountered[i] = True
+                else:
+                    ends[i] = len(input_ids[i])
+                decoded_text = self.tokenizer.decode(
+                    input_ids[i, input_len:ends[i]],
                     skip_special_tokens=True,
                     spaces_between_special_tokens=False,
                     clean_up_tokenization_spaces=True,
                 )
-            }
+                decoded_texts.append(decoded_text)
+            yield{ "text": decoded_texts}
 
-            if self.tokenizer.eos_token_id in input_ids[0, input_len:]:
+            # 如果所有批次都遇到了 EOS，则停止
+            if all(eos_encountered):
                 break
 
 
