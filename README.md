@@ -125,7 +125,7 @@ accelerate launch -m axolotl.cli.train examples/medusa/your_config.yml
 
 The data preparation code for self-distillation can be found in [`data_generation` folder](data_generation) of the current repo. For other datasets, you can directly download the data from the corresponding Hugging Face dataset repo.
 
-### Training (legacy)
+### Training on various architectures
 *The following instructions are for the initial release of Medusa, it provides a minimal example of how to train a Medusa-1 model. For the updated version, please refer to the previous section.*
 
 For training, please install:
@@ -141,14 +141,36 @@ Remark: If you haven't installed `git-lfs`, please install it before cloning:
 ```bash
 git lfs install
 ```
+
+#### Adapt the data to the model you want to enable medusa on.
+
+Start by launch an inference server you like that will run the model you want to train on.
+Let's use [mistralai/Mistral-7B-Instruct-v0.2](https://huggingface.co/mistralai/Mistral-7B-Instruct-v0.2) as an example.
+
+For instance you can use [text-generation-inference](https://github.com/huggingface/text-generation-inference), which you
+can also use after you've trained the medusa heads.
+
+```
+model=mistralai/Mistral-7B-Instruct-v0.2
+volume=$PWD/data # share a volume with the Docker container to avoid downloading weights every run
+docker run --gpus all --shm-size 1g -p 8080:80 -v $volume:/data ghcr.io/huggingface/text-generation-inference:latest --model-id $model --input-length 4000 --max-total-tokens 4096 --max-batch-prefill-tokens 4000
+```
+The sequences in shareGPT are relatively long for some, so make sure you can infer on those. If you do not have enough room, the script will simply ignore those long conversation.
+It shouldn't impact too much downstream performance, but more data is always better.
+You can use various tradeoffs to [speed up inference](https://huggingface.co/docs/text-generation-inference/index) but the defaults show be good enough in most cases.
+
+```
+python create_data.py --input-filename ShareGPT_Vicuna_unfiltered/ShareGPT_V4.3_unfiltered_cleaned_split.json --output-filename mistral.json
+```
+
 #### Train the model
 We follow the training setup from [FastChat](https://github.com/lm-sys/FastChat#fine-tuning), but with a much larger learning rate because we freeze the original model and only train the new heads. Here is the training command for the Vicuna-7b model on 4 GPUs. Since we are only training the new heads, the training does not require a lot of memory, and only data parallelism is needed. You can modify the script to fit your own setup. For larger models, we use the same setup. You can also use `--load_in_8bit` or `--load_in_4bit` to load the base model in quantized format.
 ```bash
-torchrun --nproc_per_node=4 medusa/train/train.py --model_name_or_path lmsys/vicuna-7b-v1.3 \
-    --data_path ShareGPT_Vicuna_unfiltered/ShareGPT_V4.3_unfiltered_cleaned_split.json \
+torchrun --nproc_per_node=4 medusa/train/train_legacy.py --model_name_or_path mistralai/Mistral-7B-Instruct-v0.2 \
+    --data_path mistral.json \
     --bf16 True \
     --output_dir test \
-    --num_train_epochs 1 \
+    --num_train_epochs 2 \
     --per_device_train_batch_size 8 \
     --per_device_eval_batch_size 8 \
     --gradient_accumulation_steps 4 \
@@ -163,7 +185,8 @@ torchrun --nproc_per_node=4 medusa/train/train.py --model_name_or_path lmsys/vic
     --model_max_length 2048 \
     --lazy_preprocess True \
     --medusa_num_heads 3 \
-    --medusa_num_layers 1
+    --medusa_num_layers 1 \
+    --deepspeed deepspeed.json
 ```
 ### Push to Hugging Face Hub
 You can use the following command to push your model to the Hugging Face Hub:
