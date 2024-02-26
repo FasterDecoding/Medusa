@@ -51,8 +51,8 @@ def main(
     *,
     input_filename: Annotated[str, typer.Option("--input-filename")],
     output_filename: Annotated[str, typer.Option("--output-filename")],
-    url: Annotated[str, typer.Option("--url") = "http://localhost:8080/v1/chat/completions",
-    concurrency: Annotated[int, typer.Option("--concurrency") = 64
+    url: Annotated[str, typer.Option("--url")] = "http://localhost:8080/v1/chat/completions",
+    concurrency: Annotated[int, typer.Option("--concurrency")] = 64
 ):
     sem = asyncio.Semaphore(concurrency)
     async def _main():
