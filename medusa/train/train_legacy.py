@@ -29,6 +29,7 @@ from torch.utils.data import Dataset
 import transformers
 from transformers import Trainer, BitsAndBytesConfig
 from transformers.trainer_pt_utils import LabelSmoother
+from safetensors.torch import save_file
 
 from fastchat.conversation import SeparatorStyle
 from fastchat.model.model_adapter import get_conversation_template
@@ -80,7 +81,7 @@ class CustomizedTrainer(Trainer):
             medusa_labels = medusa_labels[not_ignore]
 
             # Add top-k accuracy
-            for k in range(1, 6):
+            for k in range(1, 2):
                 _, topk = medusa_logits.topk(k, dim=-1)
                 topk = topk[not_ignore]
                 correct = topk.eq(medusa_labels.unsqueeze(-1)).any(-1)
@@ -119,6 +120,7 @@ class DataArguments:
 @dataclass
 class TrainingArguments(transformers.TrainingArguments):
     cache_dir: Optional[str] = field(default=None)
+    report_to: Optional[str] = None
     optim: str = field(default="adamw_torch")
     model_max_length: int = field(
         default=2048,
@@ -158,7 +160,6 @@ def safe_save_model_for_hf_trainer(trainer: transformers.Trainer, output_dir: st
         del state_dict
         trainer._save(output_dir, state_dict=cpu_state_dict)  # noqa
 
-
 def preprocess(
     sources,
     tokenizer: transformers.PreTrainedTokenizer,
@@ -173,73 +174,43 @@ def preprocess(
     Returns:
         Dict: A dictionary containing tokenized inputs, labels, and attention mask.
     """
-    conv = get_conversation_template("vicuna")
-    roles = {"human": conv.roles[0], "gpt": conv.roles[1]}
 
     # Apply prompt templates
     conversations = []
-    for i, source in enumerate(sources):
-        if roles[source[0]["from"]] != conv.roles[0]:
-            # Skip the first one if it is not from human
-            source = source[1:]
-
-        conv.messages = []
-        for j, sentence in enumerate(source):
-            role = roles[sentence["from"]]
-            assert role == conv.roles[j % 2], f"{i}, {j}, {role}, {conv.roles[j % 2]}"
-            conv.append_message(role, sentence["value"])
-        conversations.append(conv.get_prompt())
+    prompts = []
+    # # import pdb; pdb.set_trace()
+    for i, conversation in enumerate(sources):
+        prompt = tokenizer.apply_chat_template(conversation, tokenize=False)
+        prompts.append(prompt)
+        conversations.append(conversation)
 
     # Tokenize conversations
-    input_ids = tokenizer(
-        conversations,
+    encoding = tokenizer(
+        prompts,
         return_tensors="pt",
         padding="max_length",
-        max_length=tokenizer.model_max_length,
         truncation=True,
-    ).input_ids
-    targets = input_ids.clone()
-
-    assert conv.sep_style == SeparatorStyle.ADD_COLON_TWO
+        return_offsets_mapping=True,
+    )
+    # Set everything to be ignored, except the assistant part
+    targets = torch.full_like(encoding.input_ids, IGNORE_TOKEN_ID)
+    input_ids = encoding.input_ids
 
     # Mask targets. Only compute loss on the assistant outputs.
-    sep = conv.sep + conv.roles[1] + ": "
-    for conversation, target in zip(conversations, targets):
-        total_len = int(target.ne(tokenizer.pad_token_id).sum())
+    for conv_index, (conversation, target, prompt) in enumerate(zip(conversations, targets, prompts)):
 
-        turns = conversation.split(conv.sep2)
-        cur_len = 1
-        target[:cur_len] = IGNORE_TOKEN_ID
-        for i, turn in enumerate(turns):
-            if turn == "":
-                break
-            turn_len = len(tokenizer(turn).input_ids)
+        for turn in conversation:
+            if turn["role"] == "assistant":
+                content = turn["content"]
+                # Unfortunate strip() necessary because chat templates are doing the same.
+                start = prompt.index(content.strip())
+                stop = start + len(content)
+                indices= []
+                for tok_index, (tok_start, tok_stop) in enumerate(encoding.offset_mapping[conv_index]):
+                    if tok_stop >= start or tok_start < tok_stop:
+                        indices.append(tok_index)
+                target[indices] = encoding.input_ids[conv_index][indices]
 
-            parts = turn.split(sep)
-            if len(parts) != 2:
-                break
-            parts[0] += sep
-            # "-2" is hardcoded for the LLaMA tokenizer to make the offset correct.
-            instruction_len = len(tokenizer(parts[0]).input_ids) - 2
-
-            # Ignore the user instructions
-            target[cur_len : cur_len + instruction_len] = IGNORE_TOKEN_ID
-            cur_len += turn_len
-
-        target[cur_len:] = IGNORE_TOKEN_ID
-
-        if False:  # Inspect and check the correctness of masking
-            z = target.clone()
-            z = torch.where(z == IGNORE_TOKEN_ID, tokenizer.unk_token_id, z)
-            rank0_print(tokenizer.decode(z))
-
-        if cur_len < tokenizer.model_max_length:
-            if cur_len != total_len:
-                target[:] = IGNORE_TOKEN_ID
-                rank0_print(
-                    f"WARNING: tokenization mismatch: {cur_len} vs. {total_len}."
-                    f" (ignored)"
-                )
 
     return dict(
         input_ids=input_ids,
@@ -260,7 +231,7 @@ class SupervisedDataset(Dataset):
         super(SupervisedDataset, self).__init__()
 
         rank0_print("Formatting inputs...")
-        sources = [example["conversations"] for example in raw_data]
+        sources = raw_data
         data_dict = preprocess(sources, tokenizer)
 
         self.input_ids = data_dict["input_ids"]
@@ -304,7 +275,7 @@ class LazySupervisedDataset(Dataset):
         if i in self.cached_data_dict:
             return self.cached_data_dict[i]
 
-        ret = preprocess([self.raw_data[i]["conversations"]], self.tokenizer)
+        ret = preprocess([self.raw_data[i]], self.tokenizer)
         ret = dict(
             input_ids=ret["input_ids"][0],
             labels=ret["labels"][0],
@@ -364,23 +335,12 @@ def train():
         config.rope_scaling = {"type": "linear", "factor": scaling_factor}
     config.use_cache = False
 
-    quantization_config = BitsAndBytesConfig(
-        load_in_4bit=True,
-        bnb_4bit_compute_dtype=torch.bfloat16,
-        bnb_4bit_use_double_quant=True,
-        bnb_4bit_quant_type="nf4",
-    )
-
     # Load model and tokenizer
     model = transformers.AutoModelForCausalLM.from_pretrained(
         model_args.model_name_or_path,
         config=config,
         cache_dir=training_args.cache_dir,
-        low_cpu_mem_usage=True,
         torch_dtype=torch.bfloat16,
-        quantization_config=quantization_config if model_args.load_in_4bit else None,
-        load_in_4bit=model_args.load_in_4bit,
-        load_in_8bit=model_args.load_in_8bit,
     )
 
     # Freeze the base model
@@ -403,7 +363,7 @@ def train():
         cache_dir=training_args.cache_dir,
         model_max_length=training_args.model_max_length,
         padding_side="right",
-        use_fast=False,
+        use_fast=True,
     )
     tokenizer.pad_token = tokenizer.unk_token
 
@@ -420,7 +380,6 @@ def train():
     # Save Medusa config
     medusa_config.save_pretrained(training_args.output_dir)
 
-    # import pdb; pdb.set_trace()
     # Start trainner
     trainer = CustomizedTrainer(
         model=medusa_lm_head, tokenizer=tokenizer, args=training_args, **data_module
@@ -438,12 +397,19 @@ def train():
         lm_head = medusa_lm_head.module.medusa_head
     else:
         lm_head = medusa_lm_head.medusa_head
+    import deepspeed
+    with deepspeed.zero.GatheredParameters(lm_head.parameters()):
+        state_dict = lm_head.state_dict()
 
     # Save Medusa heads
-    torch.save(
-        lm_head.state_dict(),
-        os.path.join(training_args.output_dir, "medusa_lm_head.pt"),
-    )
+    if local_rank == 0:
+        # Modify the tokenizer internal state before saving.
+        tokenizer.encode("Test", truncation=None, padding="do_not_pad")
+        tokenizer.save_pretrained(training_args.output_dir)
+        save_file(
+            state_dict,
+            os.path.join(training_args.output_dir, "medusa_lm_head.safetensors"),
+        )
 
 
 if __name__ == "__main__":

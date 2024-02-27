@@ -90,8 +90,8 @@ class MedusaModel(nn.Module):
         super().__init__()
         self.base_model = base_model
         self.config = base_model.config
-        self.hidden_size = base_model.lm_head.weight.shape[-1]  
-        self.vocab_size = base_model.lm_head.weight.shape[0]
+        self.hidden_size = base_model.config.hidden_size
+        self.vocab_size = base_model.config.vocab_size
         self.medusa = medusa_num_heads
         self.medusa_num_layers = medusa_num_layers
         self.base_model_name_or_path = base_model_name_or_path
@@ -110,9 +110,12 @@ class MedusaModel(nn.Module):
         # Ensure medusa_head's dtype and device align with the base_model
         self.medusa_head.to(self.base_model.dtype).to(self.base_model.device)
 
-        for i in range(medusa_num_heads):
-            # Initialize the weights of each medusa_head using the base model's weights
-            self.medusa_head[i][-1].weight.data[:] = base_model.lm_head.weight.data[:]
+        import deepspeed
+        params = [base_model.lm_head.weight]
+        with deepspeed.zero.GatheredParameters(params):
+            for i in range(medusa_num_heads):
+                # Initialize the weights of each medusa_head using the base model's weights
+                self.medusa_head[i][-1].weight.data[:] = base_model.lm_head.weight.data[:]
 
     def get_tokenizer(self):
         """Get the tokenizer of the base model.
@@ -189,7 +192,7 @@ class MedusaModel(nn.Module):
             torch.Tensor: A tensor containing predictions from all Medusa heads.
             (Optional) Original predictions from the base model's LM head.
         """
-        with torch.inference_mode():
+        with torch.no_grad():
             # Pass input through the base model
             outputs = self.base_model.model(
                 input_ids=input_ids,
