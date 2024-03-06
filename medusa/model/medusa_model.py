@@ -7,7 +7,7 @@ import pdb
 # # monkey patch
 # transformers.models.llama.modeling_llama.LlamaForCausalLM = KVLlamaForCausalLM
 # transformers.models.mistral.modeling_mistral.MistralForCausalLM = KVMistralForCausalLM
-
+import copy
 from transformers import PreTrainedModel, PretrainedConfig
 from .utils import *
 from .kv_cache import initialize_past_key_values
@@ -106,7 +106,7 @@ class MedusaModelABC(nn.Module):
         self.medusa = medusa_num_heads
         self.medusa_num_layers = medusa_num_layers
         self.base_model_name_or_path = base_model_name_or_path
-        self.tokenizer = AutoTokenizer.from_pretrained(self.base_model_name_or_path)
+        self.tokenizer = AutoTokenizer.from_pretrained(self.base_model_name_or_path, use_fast=True)
         # Create a list of Medusa heads
         self.medusa_head = nn.ModuleList(
             [
@@ -287,7 +287,7 @@ class MedusaModelABC(nn.Module):
         self.medusa_choices = medusa_choices
 
         # Initialize the past key and value states
-        if hasattr(self, "past_key_values"):
+        if hasattr(self, "past_key_values") and batch_size==self.past_key_values_data.shape[1]:
             past_key_values = self.past_key_values
             past_key_values_data = self.past_key_values_data
             current_length_data = self.current_length_data
@@ -303,7 +303,8 @@ class MedusaModelABC(nn.Module):
             self.past_key_values_data = past_key_values_data
             self.current_length_data = current_length_data
 
-        input_len = input_ids.shape[1]
+        # input_len = input_ids.shape[1]
+        input_len = (input_ids != self.tokenizer.pad_token_id).sum(dim=1)
 
         reset_medusa_mode(self)
         # Initialize tree attention mask and process prefill tokens
@@ -312,8 +313,16 @@ class MedusaModelABC(nn.Module):
         )
         new_token = 0
         last_round_token = 0
-        ends = [input_len] * batch_size
-        for idx in range(max_steps):
+        if isinstance(input_len, int):
+            ends = [input_len] * batch_size
+        else:
+            ends = copy.deepcopy(input_len)
+
+        target_lenght = torch.ones(batch_size, dtype=torch.int, device=input_ids.device)*max_steps
+        any_finished = torch.any(target_lenght<=0)
+        all_finished = torch.all(target_lenght<=0)
+        # for idx in range(max_steps):
+        while not all_finished:
             # Generate candidates with topk predictions from Medusa heads
             candidates, tree_candidates = generate_candidates(
                 medusa_logits,
@@ -358,23 +367,29 @@ class MedusaModelABC(nn.Module):
                 attention_mask=attention_mask,
                 padding_idx=self.tokenizer.pad_token_id
             )
-
             decoded_texts = []
             eos_encountered = [False] * batch_size
+            target_lenght -= valid_length
+            any_finished = torch.any(target_lenght<=0)
+            all_finished = torch.all(target_lenght<=0)
             for i in range(batch_size):
+                if isinstance(input_len, int):
+                    input_len_ = input_len
+                else:
+                    input_len_ = input_len[i]
                 # 检查当前批次的文本是否包含结束符
-                if self.tokenizer.eos_token_id in input_ids[i, input_len:]:
+                if self.tokenizer.eos_token_id in input_ids[i, input_len_:]:
                     eos_encountered[i] = True
                 else:
                     ends[i] = len(input_ids[i])
                 decoded_text = self.tokenizer.decode(
-                    input_ids[i, input_len:ends[i]],
+                    input_ids[i, input_len_:ends[i]],
                     skip_special_tokens=True,
                     spaces_between_special_tokens=False,
                     clean_up_tokenization_spaces=True,
                 )
                 decoded_texts.append(decoded_text)
-            yield{ "text": decoded_texts}
+            yield{"text": decoded_texts}
 
             # 如果所有批次都遇到了 EOS，则停止
             if all(eos_encountered):

@@ -27,7 +27,8 @@ import pdb
 def main(args):
     prefix = "A chat between a curious user and an artificial intelligence assistant. The assistant gives helpful, detailed, and polite answers to the user's questions. USER: {0} ASSISTANT:"
     # prompt = ["你叫什么名字"]
-    prompt = ["你叫什么名字", "中国的首都是哪里呢？"]
+    # prompt = ["你叫什么名字", "中国的首都是哪里呢？"]
+    prompt = ["openai是家什么公司？", "2+2等于几？"]
     prompt = [prefix.format(p) for p in prompt]
     model = MedusaModel.from_pretrained(
         args.model,
@@ -47,7 +48,8 @@ def main(args):
             input_ids,
             attention_mask=attention_mask,
             temperature=args.temperature,
-            max_steps=args.max_steps,
+            # temperature=0,
+            max_steps=args.max_steps
         ):
         print(output['text'])
 
@@ -68,7 +70,7 @@ if __name__ == "__main__":
         "--conv-system-msg", type=str, default=None, help="Conversation system message."
     )
     parser.add_argument("--temperature", type=float, default=0.7)
-    parser.add_argument("--max-steps", type=int, default=512)
+    parser.add_argument("--max-steps", type=int, default=10)
     parser.add_argument("--no-history", action="store_true")
     parser.add_argument(
         "--style",
