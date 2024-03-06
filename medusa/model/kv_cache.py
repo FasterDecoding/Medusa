@@ -1,5 +1,5 @@
 import torch
-
+import copy
 
 class KVCache:
     """
@@ -41,32 +41,51 @@ class KVCache:
 
         Args:
             indices (torch.Tensor): Indices of the data tensor to be copied.
-            prev_length (int): Previous length before adding new data.
+            prev_length (int): Previous lengths before adding new data
             dim (int, optional): Dimension along which copying should be performed. Default is 2.
         """
+        # 选取需要复制的数据
         tgt = self.data.index_select(dim, indices)
-        dst = self.data.narrow(dim, prev_length, tgt.shape[dim])
-        dst.copy_(tgt, non_blocking=True)
-        self.current_length.fill_(prev_length + tgt.shape[dim])
+        prev_len = prev_length
+        start_index = prev_len
+        end_index = start_index + tgt.shape[dim]
+        # 根据维度选取目标区域并复制数据
+        if dim == 2:
+            dst = self.data[:, :, :, start_index:end_index, :]
+        elif dim == 3:
+            dst = self.data[:, :, :, :, start_index:end_index]
+        else:
+            raise ValueError("Unsupported dimension for copying.")
+        dst.copy_(tgt[:, :], non_blocking=True)   
+        self.current_length.fill_(prev_length + tgt.shape[dim]) 
 
     def cat(self, tensor: torch.Tensor, dim: int = 2):
         """
-        Concatenate the given tensor with the current data.
+        Concatenate the given tensor with the current data for batch_size > 1, and return the tensor
+        truncated to the maximum current length across all batches.
 
         Args:
-            tensor (torch.Tensor): The tensor to be concatenated.
+            tensor (torch.Tensor): The tensor to be concatenated, assuming the first dimension is the batch size.
             dim (int, optional): The dimension along which concatenation should be done. Default is 2.
 
         Returns:
-            torch.Tensor: The data tensor after concatenation up to the current length.
+            torch.Tensor: The data tensor after concatenation and truncation to the maximum current length.
         """
-        dst = self.data.narrow(dim, self.current_length, tensor.shape[dim])
-        dst.copy_(tensor)
+        cur_len = copy.deepcopy(self.current_length)
+        new_len = cur_len + tensor.size(dim)
         self.current_length.add_(tensor.shape[dim])
-        return torch.narrow(self.data, 2, 0, self.current_length)
+        if dim == 2:
+            self.data[:, :, cur_len:new_len, :] = tensor[:,:,:,:]
+            truncated_data = self.data[:, :, :self.current_length, :]
+        elif dim == 3:
+            self.data[:, :, :, cur_len:new_len] = tensor[:,:,:,:]
+            truncated_data = self.data[:, :, :, :self.current_length]
+        else:
+            raise ValueError("Unsupported dimension for concatenation.")        
+        return truncated_data
 
 
-def initialize_past_key_values(model):
+def initialize_past_key_values(model, batch_size=1):
     """
     Initialize past key and value states for a given transformer model.
 
@@ -84,8 +103,6 @@ def initialize_past_key_values(model):
     """
     # Extracting configuration from the model
     config = model.config
-    # Initializing the batch size to 1, this can be modified if different batch sizes are required
-    batch_size = 1
     # Initializing a tensor to store past keys and values for all layers
     past_key_values_data = torch.zeros(
         config.num_hidden_layers * 2,
