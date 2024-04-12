@@ -11,12 +11,12 @@ app = typer.Typer()
 
 client = httpx.AsyncClient(timeout=None)
 
-async def run(conv: Conversation):
+async def run(conv: Conversation, url: str):
     payload = {"model":"tgi", "messages": conv.messages}
     response = await client.post(url, json=payload)
     content = response.json()
     message = content["choices"][0]["message"]
-    message.pop("name")
+    message.pop("name", None)
     conv.add_message(message)
 
 
@@ -34,15 +34,16 @@ def fix_source(source):
     return new_source
 
 
-async def recreate_conversation(conversation, sem):
+async def recreate_conversation(conversation, sem, url):
     async with sem:
         conv = Conversation()
         try:
             for message in conversation[::2]:
                 assert message["role"] == "user"
                 conv.add_message(message)
-                await run(conv)
-        except Exception:
+                await run(conv, url)
+        except Exception as e:
+            print(e)
             pass
         return conv.messages
 
@@ -62,7 +63,7 @@ def main(
 
         futures = []
         for conversation in conversations:
-            future = recreate_conversation(conversation, sem)
+            future = recreate_conversation(conversation, sem, url)
             futures.append(future)
 
         recreated_conversations = await tqdm.asyncio.tqdm.gather(*futures)

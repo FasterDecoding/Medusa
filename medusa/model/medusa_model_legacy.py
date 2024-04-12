@@ -25,12 +25,14 @@ class MedusaConfig(PretrainedConfig):
         self,
         medusa_num_heads=4,
         medusa_num_layers=1,
+        version="2",
         base_model_name_or_path="lmsys/vicuna-7b-v1.3",
         **kwargs,
     ):
         super().__init__(**kwargs)
         self.medusa_num_heads = medusa_num_heads
         self.medusa_num_layers = medusa_num_layers
+        self.version = version
         self.base_model_name_or_path = base_model_name_or_path
 
 
@@ -101,7 +103,6 @@ class MedusaModel(nn.Module):
             [
                 nn.Sequential(
                     *([ResBlock(self.hidden_size)] * medusa_num_layers),
-                    nn.Linear(self.hidden_size, self.vocab_size, bias=False),
                 )
                 for _ in range(medusa_num_heads)
             ]
@@ -109,13 +110,6 @@ class MedusaModel(nn.Module):
 
         # Ensure medusa_head's dtype and device align with the base_model
         self.medusa_head.to(self.base_model.dtype).to(self.base_model.device)
-
-        import deepspeed
-        params = [base_model.lm_head.weight]
-        with deepspeed.zero.GatheredParameters(params):
-            for i in range(medusa_num_heads):
-                # Initialize the weights of each medusa_head using the base model's weights
-                self.medusa_head[i][-1].weight.data[:] = base_model.lm_head.weight.data[:]
 
     def get_tokenizer(self):
         """Get the tokenizer of the base model.
@@ -207,7 +201,9 @@ class MedusaModel(nn.Module):
         medusa_logits = []
         # TODO: Consider parallelizing this loop for efficiency?
         for i in range(self.medusa):
-            medusa_logits.append(self.medusa_head[i](hidden_states))
+            mhidden_states = self.medusa_head[i](hidden_states)
+            mlogits = self.base_model.lm_head(mhidden_states)
+            medusa_logits.append(mlogits)
         if output_orig:
             return torch.stack(medusa_logits, dim=0), outputs, orig
         return torch.stack(medusa_logits, dim=0)
