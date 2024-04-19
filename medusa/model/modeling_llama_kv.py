@@ -32,7 +32,7 @@ from transformers.models.llama.configuration_llama import LlamaConfig
 if is_flash_attn_available():
     from flash_attn import flash_attn_func, flash_attn_varlen_func
     from flash_attn.bert_padding import index_first_axis, pad_input, unpad_input  # noqa
-
+import pdb
 
 logger = logging.get_logger(__name__)
 
@@ -315,7 +315,6 @@ class LlamaAttention(nn.Module):
         padding_mask: Optional[torch.LongTensor] = None,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
         bsz, q_len, _ = hidden_states.size()
-
         if self.config.pretraining_tp > 1:
             key_value_slicing = (self.num_key_value_heads * self.head_dim) // self.config.pretraining_tp
             query_slices = self.q_proj.weight.split(
@@ -815,6 +814,8 @@ class LlamaModel(LlamaPreTrainedModel):
         # [MODIFIED] add medusa mask
         if hasattr(self, "medusa_mask") and self.medusa_mask is not None:
             medusa_mask = self.medusa_mask
+            bs = combined_attention_mask.shape[0]
+            medusa_mask = medusa_mask.repeat(bs,1,1,1)
             medusa_len = medusa_mask.size(-1)
             combined_attention_mask[:, :, -medusa_len:, -medusa_len:][
                 medusa_mask == 0
@@ -886,7 +887,6 @@ class LlamaModel(LlamaPreTrainedModel):
                 padding_mask = attention_mask
             else:
                 padding_mask = None
-
         attention_mask = self._prepare_decoder_attention_mask(
             attention_mask, (batch_size, seq_length), inputs_embeds, past_key_values_length
         )
@@ -1038,7 +1038,6 @@ class LlamaForCausalLM(LlamaPreTrainedModel):
             output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
         )
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
-
         # decoder outputs consists of (dec_features, layer_state, dec_hidden, dec_attn)
         outputs = self.model(
             input_ids=input_ids,
