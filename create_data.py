@@ -12,7 +12,7 @@ app = typer.Typer()
 client = httpx.AsyncClient(timeout=None)
 
 async def run(conv: Conversation, url: str):
-    payload = {"model":"tgi", "messages": conv.messages}
+    payload = {"model":"", "messages": conv.messages}
     response = await client.post(url, json=payload)
     content = response.json()
     message = content["choices"][0]["message"]

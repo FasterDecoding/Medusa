@@ -404,9 +404,9 @@ def train():
         lm_head = medusa_lm_head.module.medusa_head
     else:
         lm_head = medusa_lm_head.medusa_head
-    import deepspeed
-    with deepspeed.zero.GatheredParameters(lm_head.parameters()):
-        state_dict = lm_head.state_dict()
+    # import deepspeed
+    # with deepspeed.zero.GatheredParameters(lm_head.parameters()):
+    state_dict = lm_head.state_dict()
 
     # Save Medusa heads
     if local_rank == 0:
