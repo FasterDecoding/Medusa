@@ -8,6 +8,7 @@ from .medusa_choices import mc_sim_7b_63
 from transformers import AutoTokenizer
 import os
 from huggingface_hub import hf_hub_download
+from safetensors.torch import load_file
 
 
 class MedusaConfig(PretrainedConfig):
@@ -153,12 +154,12 @@ class MedusaModel(nn.Module):
             medusa_config.medusa_num_layers,
             medusa_config.base_model_name_or_path,
         )
-        medusa_head_path = os.path.join(medusa_head_name_or_path, "medusa_lm_head.pt")
+        medusa_head_path = os.path.join(medusa_head_name_or_path, "medusa_lm_head.safetensors")
         if os.path.exists(medusa_head_path):
             filename = medusa_head_path
         else:
-            filename = hf_hub_download(medusa_head_name_or_path, "medusa_lm_head.pt")
-        medusa_head_state_dict = torch.load(filename, map_location=base_model.device)
+            filename = hf_hub_download(medusa_head_name_or_path, "medusa_lm_head.safetensors")
+        medusa_head_state_dict = load_file(filename, device=str(base_model.device))
         model.medusa_head.load_state_dict(medusa_head_state_dict, strict=False)
 
         return model
