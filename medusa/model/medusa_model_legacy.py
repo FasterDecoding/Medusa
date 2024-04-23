@@ -5,7 +5,7 @@ from .modeling_llama_kv import LlamaForCausalLM as KVLlamaForCausalLM
 from .utils import *
 from .kv_cache import initialize_past_key_values
 from .medusa_choices import mc_sim_7b_63
-from transformers import AutoTokenizer
+from transformers import AutoTokenizer, AutoModelForCausalLM
 import os
 from huggingface_hub import hf_hub_download
 from safetensors.torch import load_file
@@ -144,7 +144,7 @@ class MedusaModel(nn.Module):
             print("Overriding base_model as:", base_model)
             medusa_config.base_model_name_or_path = base_model
             
-        base_model = KVLlamaForCausalLM.from_pretrained(
+        base_model = AutoModelForCausalLM.from_pretrained(
             medusa_config.base_model_name_or_path, **kwargs
         )
 
