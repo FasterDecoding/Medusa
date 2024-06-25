@@ -207,7 +207,7 @@ def preprocess(
                 stop = start + len(content)
                 indices= []
                 for tok_index, (tok_start, tok_stop) in enumerate(encoding.offset_mapping[conv_index]):
-                    if tok_stop >= start or tok_start < tok_stop:
+                    if tok_stop >= start and tok_start < stop:
                         indices.append(tok_index)
                 target[indices] = encoding.input_ids[conv_index][indices]
 
